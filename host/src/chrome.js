@@ -42,10 +42,14 @@ export function defaultProfileDir() {
 // Spawns the browser with --remote-debugging-pipe. Returns the child process;
 // the caller picks up the transport ends as child.stdio[3] (write) and
 // child.stdio[4] (read).
-export function spawnBrowser({ browserPath, profileDir, extraArgs = [] }) {
+//
+// With usePipe:false the browser is spawned detached without the pipe switch:
+// the kernel transport then talks to its agent socket (the fork starts the
+// listener unconditionally). Detached + unref'd so the browser outlives a
+// short-lived CLI process and can serve later clients.
+export function spawnBrowser({ browserPath, profileDir, extraArgs = [], usePipe = true }) {
   fs.mkdirSync(profileDir, { recursive: true });
   const args = [
-    "--remote-debugging-pipe",
     `--user-data-dir=${profileDir}`,
     "--no-first-run",
     "--no-default-browser-check",
@@ -54,9 +58,14 @@ export function spawnBrowser({ browserPath, profileDir, extraArgs = [] }) {
     ...extraArgs,
     "about:blank",
   ];
-  const child = spawn(browserPath, args, {
-    // fd 3 = our commands into the browser, fd 4 = browser messages back.
-    stdio: ["ignore", "ignore", "inherit", "pipe", "pipe"],
-  });
+  if (usePipe) {
+    args.unshift("--remote-debugging-pipe");
+    return spawn(browserPath, args, {
+      // fd 3 = our commands into the browser, fd 4 = browser messages back.
+      stdio: ["ignore", "ignore", "inherit", "pipe", "pipe"],
+    });
+  }
+  const child = spawn(browserPath, args, { detached: true, stdio: "ignore" });
+  child.unref();
   return child;
 }
