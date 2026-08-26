@@ -4,7 +4,8 @@ Wires prism/pdl/prism.pdl into the browser protocol build and registers
 PrismDomainHandler on browser-target sessions (AttachSession):
 - devtools/BUILD.gn: concatenate prism.pdl; generate protocol/prism.{cc,h}
 - protocol_config.json: list all 12 Prism commands (the generator only
-  emits domains configured here)
+  emits domains configured here); snapshot is async (kernel renderer is
+  a multi-request job across frame sessions)
 - content/browser/BUILD.gn: compile the handler from //prism, dep on
   //prism:prism, and compile the GENERATED prism.cc into the browser
   target (missing this is a link error)
@@ -90,16 +91,17 @@ index 948ed05..67c81cb 100644
                                                           session->GetClient());
    session->CreateAndAddHandler<protocol::SystemInfoHandler>(
 diff --git a/content/browser/devtools/protocol_config.json b/content/browser/devtools/protocol_config.json
-index bd9457f..e2bce62 100644
+index bd9457f779..fbf96307bd 100644
 --- a/content/browser/devtools/protocol_config.json
 +++ b/content/browser/devtools/protocol_config.json
-@@ -98,6 +98,10 @@
+@@ -98,6 +98,11 @@
                  "include": ["dumpProfilingDataOfAllProcesses"],
                  "async": ["dumpProfilingDataOfAllProcesses"]
              },
 +            {
 +                "domain": "Prism",
-+                "include": ["listTaskSpaces", "createTaskSpace", "useTaskSpace", "claimTaskSpace", "completeTaskSpace", "closeTaskSpace", "handOffTaskSpace", "takeOverTaskSpace", "listTabs", "createTab", "snapshot", "getBrowserVersion"]
++                "include": ["listTaskSpaces", "createTaskSpace", "useTaskSpace", "claimTaskSpace", "completeTaskSpace", "closeTaskSpace", "handOffTaskSpace", "takeOverTaskSpace", "listTabs", "createTab", "snapshot", "getBrowserVersion"],
++                "async": ["snapshot"]
 +            },
              {
                  "domain": "Network",

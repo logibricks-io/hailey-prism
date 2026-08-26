@@ -16,6 +16,7 @@
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "prism/browser/snapshot/snapshot_job.h"
 #include "prism/version/prism_version_values.h"
 #include "url/gurl.h"
 #include "url/url_constants.h"
@@ -337,21 +338,71 @@ Response PrismDomainHandler::CreateTab(const String& in_url,
   return Response::Success();
 }
 
-Response PrismDomainHandler::Snapshot(
+void PrismDomainHandler::Snapshot(
     std::optional<String> in_scope,
     std::optional<bool> in_includeActionMarks,
     std::optional<bool> in_includeStableLocator,
     std::optional<int> in_maxResultLength,
-    String* out_content,
-    std::unique_ptr<protocol::Array<Prism::SnapshotRef>>* out_refs) {
-  // Phase 3: kernel renderer (frame-tree AXTree composition). Until then the
-  // adapter's JS composer remains the active path (ADR-003).
+    std::unique_ptr<SnapshotCallback> callback) {
+  // Phase 3 kernel renderer (ADR-003): per-local-root AX trees via internal
+  // DevTools sessions, cross-process iframes spliced inline.
   if (auto error = RequireSelectedSpace()) {
-    return *error;
+    callback->sendFailure(*error);
+    return;
   }
-  return ErrorResponse(prism::kErrSnapshotFailed,
-                       "kernel snapshot not yet implemented; use adapter "
-                       "simulation mode");
+
+  // A freshly selected space may have no tab yet. Resolve an empty snapshot
+  // (not an error): the harness's agent-control probe reads this as "agent
+  // owns an empty space".
+  const auto* space = space_manager_.Find(*selected_space_id_);
+  content::WebContents* web_contents = nullptr;
+  for (const auto& record : space->tabs) {
+    if (record.active) {
+      auto it = tabs_.find(record.target_id);
+      if (it != tabs_.end()) {
+        web_contents = it->second.get();
+      }
+      break;
+    }
+  }
+  if (!web_contents) {
+    callback->sendSuccess(
+        String(), std::make_unique<protocol::Array<Prism::SnapshotRef>>());
+    return;
+  }
+
+  prism::SnapshotOptions options;
+  options.only_within_viewport = in_scope == "only_within_viewport";
+  options.include_action_marks = in_includeActionMarks.value_or(true);
+  options.include_stable_locator = in_includeStableLocator.value_or(true);
+  options.max_result_length = in_maxResultLength.value_or(0);
+
+  // The job self-owns: it stays alive through the attached agent hosts and
+  // deletes itself after firing the callback (see SnapshotJob::Finish/Fail).
+  auto* job = new prism::SnapshotJob(
+      web_contents, options,
+      base::BindOnce(
+          [](std::unique_ptr<SnapshotCallback> callback,
+             std::optional<prism::SnapshotResult> result,
+             const std::string& error) {
+            if (!result) {
+              callback->sendFailure(ErrorResponse(prism::kErrSnapshotFailed,
+                                                  error));
+              return;
+            }
+            auto refs =
+                std::make_unique<protocol::Array<Prism::SnapshotRef>>();
+            for (const auto& ref : result->refs) {
+              refs->emplace_back(Prism::SnapshotRef::Create()
+                                     .SetBackendNodeId(ref.backend_node_id)
+                                     .SetRole(ref.role)
+                                     .SetName(ref.name)
+                                     .Build());
+            }
+            callback->sendSuccess(result->content, std::move(refs));
+          },
+          std::move(callback)));
+  job->Run();
 }
 
 Response PrismDomainHandler::GetBrowserVersion(

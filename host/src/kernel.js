@@ -22,11 +22,27 @@ import os from "node:os";
 import path from "node:path";
 
 import { snapshotTarget } from "./snapshot.js";
+import { defaultProfileDir } from "./chrome.js";
+
+// The kernel binds its listener per profile when launched with
+// --user-data-dir (every dev/test spawn) and at the global default otherwise.
+// Try both, profile first (that's what our own spawns produce).
+const GLOBAL_SOCKET_PATH = path.join(
+  os.homedir(), "Library", "Application Support", "Prism", "agent.sock",
+);
 
 export const KERNEL_SOCKET_PATH =
   process.env.PRISM_AGENT_SOCKET && process.env.PRISM_AGENT_SOCKET !== "off"
     ? process.env.PRISM_AGENT_SOCKET
-    : path.join(os.homedir(), "Library", "Application Support", "Prism", "agent.sock");
+    : null;
+
+export function kernelSocketCandidates() {
+  if (KERNEL_SOCKET_PATH) return [KERNEL_SOCKET_PATH];
+  return [
+    path.join(defaultProfileDir(), "prism-agent.sock"),
+    GLOBAL_SOCKET_PATH,
+  ];
+}
 
 // PRISM_AGENT_SOCKET=off forces the daemon transport (A/B and stock-Chromium
 // runs).
@@ -34,12 +50,20 @@ export function kernelTransportEnabled() {
   return process.env.PRISM_AGENT_SOCKET !== "off";
 }
 
-export function connectToKernel(socketPath = KERNEL_SOCKET_PATH) {
-  return new Promise((resolve, reject) => {
-    const socket = net.createConnection(socketPath);
-    socket.once("error", reject);
-    socket.once("connect", () => resolve(new KernelClient(socket)));
-  });
+export async function connectToKernel() {
+  let lastError;
+  for (const socketPath of kernelSocketCandidates()) {
+    try {
+      return await new Promise((resolve, reject) => {
+        const socket = net.createConnection(socketPath);
+        socket.once("error", reject);
+        socket.once("connect", () => resolve(new KernelClient(socket)));
+      });
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError ?? new Error("no kernel agent socket reachable");
 }
 
 const WIRE_CODE_RE = /^([A-Z][A-Z0-9_]+): ([\s\S]*)$/;
@@ -237,10 +261,20 @@ export function buildKernelPrismBindings(kernel) {
   prism.listTabs = () => call("listTabs");
   prism.createTab = (url) => call("createTab", { url });
 
-  // The kernel Prism.snapshot renderer is Phase 3; until then compose locally
-  // from the selected space's active tab (same approach as the daemon's
-  // simulation path, against the real kernel tabs).
+  // Snapshot: the kernel renderer (Phase 3) is the preferred path — it
+  // composes the full frame tree including cross-process iframes. The local
+  // JS composer (host/src/snapshot.js) remains as fallback for kernels that
+  // predate it (detected by the phase-2 stub's error text).
   prism.snapshot = async (options = {}) => {
+    try {
+      return await kernel.callPrism("snapshot", options ?? {});
+    } catch (error) {
+      if (!/not yet implemented|was not found|unknown/i.test(error.message)) {
+        error.error_code = error.code;
+        throw error;
+      }
+      // Fall through to the JS composer.
+    }
     let tabs;
     try {
       ({ tabs } = await kernel.callPrism("listTabs"));

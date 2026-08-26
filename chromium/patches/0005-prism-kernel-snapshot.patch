@@ -1,0 +1,21 @@
+Subject: [PATCH 0005] Compile the Prism kernel snapshot job
+
+Adds //prism/browser/snapshot/snapshot_job.{h,cc} to the content/browser
+target (the job drives internal per-frame DevTools sessions and needs
+content/ internals: FrameTree, RenderFrameDevToolsAgentHost). The pure
+composer (snapshot_composer) lives in //prism:prism.
+
+diff --git a/content/browser/BUILD.gn b/content/browser/BUILD.gn
+index 5ea670c5f5..ad8593aa4f 100644
+--- a/content/browser/BUILD.gn
++++ b/content/browser/BUILD.gn
+@@ -731,6 +731,9 @@ source_set("browser") {
+     "browser_main.h",
+     "browser_main_loop.cc",
+     "browser_main_loop.h",
++    # Prism: Phase 3 kernel snapshot job (patch 0005).
++    "//prism/browser/snapshot/snapshot_job.cc",
++    "//prism/browser/snapshot/snapshot_job.h",
+     "browser_main_runner_impl.cc",
+     "browser_main_runner_impl.h",
+     "browser_plugin/browser_plugin_embedder.cc",

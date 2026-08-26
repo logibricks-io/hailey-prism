@@ -96,15 +96,13 @@ class PrismDomainHandler : public DevToolsDomainHandler,
                         out_tabs) override;
   Response CreateTab(const String& in_url, String* out_targetId) override;
 
-  // Prism::Backend — snapshot (Phase 3 kernel renderer; stub until then).
-  Response Snapshot(
-      std::optional<String> in_scope,
-      std::optional<bool> in_includeActionMarks,
-      std::optional<bool> in_includeStableLocator,
-      std::optional<int> in_maxResultLength,
-      String* out_content,
-      std::unique_ptr<protocol::Array<protocol::Prism::SnapshotRef>>* out_refs)
-      override;
+  // Prism::Backend — snapshot (Phase 3 kernel renderer; async — registered
+  // with "async" in protocol_config.json).
+  void Snapshot(std::optional<String> in_scope,
+                std::optional<bool> in_includeActionMarks,
+                std::optional<bool> in_includeStableLocator,
+                std::optional<int> in_maxResultLength,
+                std::unique_ptr<SnapshotCallback> callback) override;
 
   // Prism::Backend — version.
   Response GetBrowserVersion(String* out_currentVersion,

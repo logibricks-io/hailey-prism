@@ -43,6 +43,15 @@ base::FilePath AgentSocketServer::SocketPath() {
   if (command_line.HasSwitch(kSocketPathSwitch)) {
     return command_line.GetSwitchValuePath(kSocketPathSwitch);
   }
+  // With an explicit --user-data-dir (every test/dev spawn), scope the socket
+  // to the profile: multiple fork instances then never stomp each other's
+  // listener path (profile locking already guarantees one browser per dir).
+  // (The switch name literal: switches::kUserDataDir lives in chrome/common,
+  // which content/ cannot see.)
+  if (command_line.HasSwitch("user-data-dir")) {
+    return command_line.GetSwitchValuePath("user-data-dir")
+        .Append("prism-agent.sock");
+  }
   base::FilePath home;
   if (!base::PathService::Get(base::DIR_HOME, &home)) {
     return base::FilePath();

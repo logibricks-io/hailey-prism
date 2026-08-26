@@ -34,9 +34,9 @@ import { buildPrismBindings, connectToDaemon } from "./client.js";
 import { SOCKET_PATH } from "./daemon.js";
 import { defaultProfileDir, spawnBrowser } from "./chrome.js";
 import {
-  KERNEL_SOCKET_PATH,
   buildKernelPrismBindings,
   connectToKernel,
+  kernelSocketCandidates,
   kernelTransportEnabled,
 } from "./kernel.js";
 
@@ -144,7 +144,7 @@ async function main() {
           const version = await kernel.callPrism("getBrowserVersion");
           stream.write(`kernel agent socket: ok\n`);
           stream.write(`browser: ${version.currentVersion}\n`);
-          stream.write(`socket: ${KERNEL_SOCKET_PATH}\n`);
+          stream.write(`socket: ${kernelSocketCandidates().join(", ")}\n`);
           return 0;
         }
         const ping = await client.call("host.ping");

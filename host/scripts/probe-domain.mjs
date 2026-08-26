@@ -159,7 +159,120 @@ async function runParallelIsolation(sockPath) {
   }
 }
 
-async function runPipeSuite(profileDir) {
+// Phase 3 kernel snapshot suite: a nested-iframe fixture over loopback. The
+// fixture serves one HTTP server on 127.0.0.1; pages reference iframes on
+// "localhost" (same port, different host name) — different site, so the child
+// frame is out-of-process (OOPIF). Three nesting levels:
+//   L0 http://127.0.0.1:PORT/top  → L1 http://localhost:PORT/mid (OOPIF)
+//                                 → L2 http://127.0.0.1:PORT/leaf (in L0's process)
+async function runSnapshotSuite(cdp, fixtureOriginA, fixtureOriginB) {
+  const created = await cdp.send("Prism.createTaskSpace", { name: "snapshot-probe" });
+  await cdp.send("Prism.useTaskSpace", { id: created.taskSpace.id });
+
+  const tab = await cdp.send("Prism.createTab", { url: `${fixtureOriginA}/top` });
+  // Let all nested frames settle.
+  await new Promise((resolve) => setTimeout(resolve, 3000));
+
+  const snap = await cdp.send("Prism.snapshot", {});
+  const snapVerbose = process.env.PRISM_PROBE_VERBOSE
+    ? `\n${snap.content}`
+    : `${snap.content.length}B, ${snap.refs.length} refs`;
+  console.log(`  snapshot content:${snapVerbose}`);
+  check("snapshot: returns content + refs",
+    typeof snap.content === "string" && Array.isArray(snap.refs),
+    `content=${snap.content?.length ?? "?"}B refs=${snap.refs?.length ?? "?"}`);
+  check("snapshot: contains the OOPIF mid-frame button with a ref",
+    /- button "mid-level action" \[ref=\d+/.test(snap.content),
+    snap.content.split("\n").filter((l) => l.includes("mid-level")).join(" / "));
+  check("snapshot: contains the third-level (leaf) input with a ref",
+    /- (textbox|searchbox) "leaf-level field" \[ref=\d+/.test(snap.content),
+    snap.content.split("\n").filter((l) => l.includes("leaf-level")).join(" / "));
+  check("snapshot: link url annotation present",
+    /\[ref=\d+, loc=role:link\[name="top docs"\], url=https?:\/\//.test(snap.content) ||
+      /url=https?:\/\/.*top-docs/.test(snap.content),
+    snap.content.split("\n").filter((l) => l.includes("link")).slice(0, 2).join(" / "));
+  const lineOf = (needle) => snap.content.split("\n").find((l) => l.includes(needle)) ?? "";
+  const indentOf = (needle) => lineOf(needle).match(/^ */)[0].length;
+  check("snapshot: iframe content is nested below its owner",
+    snap.content.indexOf("top-level action") < snap.content.indexOf("mid-level action") &&
+      snap.content.indexOf("mid-level action") < snap.content.indexOf("leaf-level field") &&
+      indentOf("mid-level action") > indentOf("top-level action") &&
+      indentOf("leaf-level field") > indentOf("mid-level action"),
+    `indents top=${indentOf("top-level action")} mid=${indentOf("mid-level action")} leaf=${indentOf("leaf-level field")}`);
+
+  // ref stability: same element, same backendNodeId across calls.
+  const refOf = (s, name) => s.refs.find((r) => r.name === name)?.backendNodeId;
+  const snapAgain = await cdp.send("Prism.snapshot", {});
+  check("snapshot: ref stable across calls",
+    refOf(snap, "top-level action") != null &&
+      refOf(snap, "top-level action") === refOf(snapAgain, "top-level action"),
+    `first=${refOf(snap, "top-level action")} second=${refOf(snapAgain, "top-level action")}`);
+
+  // maxResultLength truncation.
+  const truncated = await cdp.send("Prism.snapshot", { maxResultLength: 120 });
+  check("snapshot: maxResultLength truncates content",
+    truncated.content.length === 120, `len=${truncated.content.length}`);
+
+  // only_within_viewport drops the off-screen button.
+  const scoped = await cdp.send("Prism.snapshot", { scope: "only_within_viewport" });
+  check("snapshot: only_within_viewport drops off-viewport actionable",
+    !scoped.content.includes("below-the-fold action") &&
+      scoped.content.includes("top-level action"),
+    scoped.content.split("\n").filter((l) => l.includes("action")).join(" / "));
+
+  // An empty (no-tab) space resolves an empty snapshot, not an error.
+  const fresh = await cdp.send("Prism.createTaskSpace", { name: "snapshot-empty" });
+  await cdp.send("Prism.useTaskSpace", { id: fresh.taskSpace.id });
+  const emptySnap = await cdp.send("Prism.snapshot", {});
+  check("snapshot: no-tab space resolves empty",
+    emptySnap.content === "" && emptySnap.refs.length === 0,
+    JSON.stringify(emptySnap));
+
+  await cdp.send("Prism.closeTaskSpace");  // empty space
+  await cdp.send("Prism.useTaskSpace", { id: created.taskSpace.id });
+  await cdp.send("Prism.closeTaskSpace");  // the fixture space (tabs die with it)
+}
+
+// Starts the nested-iframe fixture server; returns { port, close }.
+async function startIframeFixture() {
+  const { createServer } = await import("node:http");
+  const page = (title, body) =>
+    `<!doctype html><html><head><title>${title}</title></head><body>${body}</body></html>`;
+  const server = createServer((req, res) => {
+    const host = req.headers.host?.split(":")[0];
+    const port = new URL(`http://${req.headers.host}`).port;
+    const a = `127.0.0.1:${port}`;   // site A (this server when addressed as 127.0.0.1)
+    const b = `localhost:${port}`;   // site B (same server, different site)
+    if (req.url === "/top") {
+      res.end(page("fixture top", `
+        <h1>top level</h1>
+        <button>top-level action</button>
+        <a href="http://${a}/top-docs">top docs</a>
+        <button style="position:absolute;top:5000px">below-the-fold action</button>
+        <iframe src="http://${b}/mid" style="width:600px;height:400px"></iframe>`));
+    } else if (req.url === "/mid") {
+      res.end(page("fixture mid", `
+        <p>mid level</p>
+        <button>mid-level action</button>
+        <iframe src="http://${a}/leaf" style="width:400px;height:200px"></iframe>`));
+    } else if (req.url === "/leaf") {
+      res.end(page("fixture leaf", `
+        <p>leaf level</p>
+        <input aria-label="leaf-level field" type="text">`));
+    } else {
+      res.end(page("fixture", "<p>ok</p>"));
+    }
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  return {
+    originA: `http://127.0.0.1:${port}`,
+    originB: `http://localhost:${port}`,
+    close: () => server.close(),
+  };
+}
+
+async function runPipeSuite(profileDir, fixture) {
   const child = spawnBrowser({ browserPath, profileDir });
   const transport = new PipeTransport({
     writeStream: child.stdio[3],
@@ -168,6 +281,7 @@ async function runPipeSuite(profileDir) {
   const cdp = new CdpConnection(transport);
   try {
     await runSuite(cdp, "pipe");
+    await runSnapshotSuite(cdp, fixture.originA, fixture.originB);
   } catch (error) {
     check("pipe: unexpected transport failure", false, error.message);
   } finally {
@@ -209,8 +323,13 @@ async function runSocketSuites(profileDir) {
 }
 
 const stamp = Date.now();
-await runPipeSuite(path.join(os.tmpdir(), `prism-probe-pipe-${stamp}`));
-await runSocketSuites(path.join(os.tmpdir(), `prism-probe-sock-${stamp}`));
+const fixture = await startIframeFixture();
+try {
+  await runPipeSuite(path.join(os.tmpdir(), `prism-probe-pipe-${stamp}`), fixture);
+  await runSocketSuites(path.join(os.tmpdir(), `prism-probe-sock-${stamp}`));
+} finally {
+  fixture.close();
+}
 
 console.log(failures ? `PROBE FAILED (${failures})` : "PROBE OK");
 process.exit(failures ? 1 : 0);

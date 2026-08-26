@@ -20,6 +20,8 @@ process_version("generate_version") {
 
 source_set("prism") {
   sources = [
+    "browser/snapshot/snapshot_composer.cc",
+    "browser/snapshot/snapshot_composer.h",
     "browser/spaces/space_manager.cc",
     "browser/spaces/space_manager.h",
   ]
@@ -29,14 +31,16 @@ source_set("prism") {
     "//base",
   ]
 
-  # DevTools handler + snapshot composer land here as they are implemented:
-  #   browser/devtools/prism_domain_handler.{h,cc}   (Phase 2, needs content/)
-  #   browser/snapshot/snapshot_composer.{h,cc}      (Phase 3, needs content/)
+  # DevTools handler + snapshot job land in content/browser (patch series —
+  # they need content/ internals); this target stays pure logic:
+  #   browser/devtools/prism_domain_handler.{h,cc}
+  #   browser/snapshot/snapshot_job.{h,cc}
 }
 
 source_set("unit_tests") {
   testonly = true
   sources = [
+    "browser/snapshot/snapshot_composer_unittest.cc",
     "browser/spaces/space_manager_unittest.cc",
   ]
   deps = [
