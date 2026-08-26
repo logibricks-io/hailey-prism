@@ -52,6 +52,7 @@ Smoke test without the harness bundle: `node host/scripts/smoke.mjs` (from the r
 | `PRISM_BROWSER_PROFILE` | dev profile dir (default `~/Library/Application Support/Prism/dev-profile`) |
 | `PRISM_HOST_SOCKET` | daemon socket path override |
 | `PRISM_HOST_LOG` | daemon log file (silent by default) |
+| `PRISM_HOST_DEBUG` | `1` logs daemon internals (browser launches, per-space tab creation decisions) to the daemon log/stderr |
 | `PRISM_HARNESS_BUNDLE` | harness bundle path override |
 
 ## Known limitations (simulation mode)

@@ -74,7 +74,13 @@ class HostServer {
       browserPath,
       profileDir: defaultProfileDir(),
     });
+    if (process.env.PRISM_HOST_DEBUG) {
+      console.error(`[prism-host] launched browser pid=${this.#browser.pid} path=${browserPath}`);
+    }
     this.#browser.on("exit", (code) => {
+      if (process.env.PRISM_HOST_DEBUG) {
+        console.error(`[prism-host] browser exited code=${code}`);
+      }
       for (const socket of this.#clients.keys()) {
         send(socket, { event: "browserExit", reason: `exit code ${code}` });
       }
@@ -142,9 +148,16 @@ class HostServer {
     if (guard) {
       return this.#sendError(socket, guard.message, guard.code);
     }
-    const { id: localId, method, params = {}, sessionId } = request;
+    const { id: localId, method, sessionId } = request;
+    let { params = {} } = request;
 
     try {
+      // Contract §6: raw permission grants stay unexposed to agent scripts
+      // (same as upstream). Answer with a CDP-style error so callers can
+      // classify the capability as unsupported instead of hanging.
+      if (method === "Browser.grantPermissions" || method === "Browser.setPermission") {
+        return send(socket, { event: "cdp", message: JSON.stringify({ id: localId, error: { message: `${method} is not supported for agent scripts` } }) });
+      }
       if (method === "Target.getTargets") {
         const targetInfos = this.#targetsForClient(client);
         return send(socket, { event: "cdp", message: JSON.stringify({ id: localId, result: { targetInfos } }) });
@@ -165,7 +178,21 @@ class HostServer {
         if (result.sessionId) this.#sessions.set(result.sessionId, socket);
         return send(socket, { event: "cdp", message: JSON.stringify({ id: localId, result }) });
       }
+      // Downloads: stock Chrome applies Browser.setDownloadBehavior to the
+      // default browser context only, so downloads inside a simulated Space
+      // (an isolated context) never complete. Scope the behavior to the
+      // caller's selected Space context instead.
+      if (method === "Browser.setDownloadBehavior" && !params.browserContextId) {
+        const space =
+          client.selectedSpaceId != null && this.#registry.get(client.selectedSpaceId);
+        if (space?.browserContextId) {
+          params = { ...params, browserContextId: space.browserContextId };
+        }
+      }
       // Verbatim passthrough for everything else (session-scoped or not).
+      if (process.env.PRISM_HOST_DEBUG && (method === "Target.closeTarget" || method === "Target.createTarget" || method === "Target.activateTarget")) {
+        console.error(`[prism-host] raw ${method} ${JSON.stringify(params)}`);
+      }
       const result = await this.#cdp.send(method, params, sessionId);
       send(socket, { event: "cdp", message: JSON.stringify({ id: localId, result }) });
     } catch (error) {
@@ -185,6 +212,12 @@ class HostServer {
       this.#targets.delete(params.targetId);
       this.#registry.clearTarget(params.targetId);
     }
+    if (process.env.PRISM_HOST_DEBUG && method?.startsWith("Target.target")) {
+      const info = params.targetInfo;
+      console.error(
+        `[prism-host] ${method} ${info ? `${info.targetId}:${info.type}:${info.browserContextId || "default"}` : params.targetId}`,
+      );
+    }
     if (method === "Target.detachedFromTarget" && params.sessionId) {
       const owner = this.#sessions.get(params.sessionId);
       this.#sessions.delete(params.sessionId);
@@ -199,7 +232,16 @@ class HostServer {
       return;
     }
     // Browser-level events are broadcast; harness instances filter by the
-    // sessions/targets they know about.
+    // sessions/targets they know about. Stock Chrome reports downloads as
+    // Browser.download* while the harness's download facade (inherited from
+    // upstream) listens for the legacy Page.download* names — translate in
+    // the broadcast path so page.waitForEvent("download") works unmodified.
+    if (
+      method === "Browser.downloadWillBegin" ||
+      method === "Browser.downloadProgress"
+    ) {
+      message = { ...message, method: `Page.${method.slice("Browser.".length)}` };
+    }
     for (const socket of this.#clients.keys()) {
       send(socket, { event: "cdp", message: JSON.stringify(message) });
     }
@@ -308,7 +350,13 @@ class HostServer {
         }
         const targetId = this.#registry.get(space.id)?.currentTargetId;
         if (!targetId) {
-          throw hostError("no tab in selected task space", CODES.WEB_CONTENTS);
+          // A freshly created simulated space has no tab yet (upstream spaces
+          // always hold a window with a tab). The harness's agent-control probe
+          // (waitForAgentControl) calls snapshot on such spaces and only treats
+          // USER_IN_CONTROL as "not ready" — any other rejection fails the probe.
+          // Resolve an empty snapshot so the probe reads "agent owns an empty
+          // space" instead of dying on PRISM_WEB_CONTENTS_UNAVAILABLE.
+          return { content: "", refs: [] };
         }
         try {
           return await snapshotTarget(this.#cdp, targetId, params);
@@ -369,16 +417,45 @@ class HostServer {
     if (!space.browserContextId) {
       return { error: "task space has no browser context", code: CODES.INACTIVE };
     }
+    // Only page targets prove a live window. Chrome also exposes browser_ui
+    // targets per context; they outlive the last page tab by a beat during
+    // window teardown, and counting them here makes newWindow:false target a
+    // window that is already gone ("Failed to open new tab - no browser is
+    // open").
     const hasWindow = [...this.#targets.values()].some(
-      (info) => info.browserContextId === space.browserContextId,
+      (info) =>
+        info.type === "page" &&
+        info.browserContextId === space.browserContextId,
     );
-    const created = await this.#cdp.send("Target.createTarget", {
-      url,
-      browserContextId: space.browserContextId,
-      // First tab of a context opens its window; later tabs join it.
-      newWindow: !hasWindow,
-      background: false,
-    });
+    if (process.env.PRISM_HOST_DEBUG) {
+      console.error(
+        `[prism-host] createTabInSpace space=${space.id} ctx=${space.browserContextId} hasWindow=${hasWindow} knownTargets=${[...this.#targets.values()].map((t) => `${t.targetId}:${t.type}:${t.browserContextId || "default"}`).join(",")}`,
+      );
+    }
+    // The target cache is event-driven and lags real window teardown: closing
+    // the context's last page tab resolves before Target.targetDestroyed
+    // arrives, so a createTarget with newWindow:false can still hit the window
+    // that is already gone. Retry once with a forced fresh window.
+    const createTarget = (newWindow) =>
+      this.#cdp.send("Target.createTarget", {
+        url,
+        browserContextId: space.browserContextId,
+        // First tab of a context opens its window; later tabs join it.
+        newWindow,
+        background: false,
+      });
+    let created;
+    try {
+      created = await createTarget(!hasWindow);
+    } catch (error) {
+      if (!/no browser is open/i.test(error?.message || "")) throw error;
+      if (process.env.PRISM_HOST_DEBUG) {
+        console.error(
+          `[prism-host] createTabInSpace space=${space.id} stale-window race, retrying with newWindow:true`,
+        );
+      }
+      created = await createTarget(true);
+    }
     this.#registry.setCurrentTarget(space.id, created.targetId);
     return { targetId: created.targetId };
   }
