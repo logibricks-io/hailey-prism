@@ -43,5 +43,6 @@ transfer.
 ## src-overlay/prism status
 
 - `pdl/prism.pdl` — full `Prism.*` domain definition (design-complete).
-- `browser/spaces/space_manager.{h,cc}` + unittest — the ownership state machine (complete pure logic; builds once the tree exists).
-- `browser/devtools/prism_domain_handler.{h,cc}` — error-code mapping done; the PDL-generated handler interface is wired after the fetch lands (TODO markers in the files).
+- `browser/spaces/space_manager.{h,cc}` + unittest — the ownership state machine plus per-space tab bookkeeping (pure logic, no content/ deps).
+- `browser/devtools/prism_domain_handler.{h,cc}` — compiled into content/browser via the patch series. Task-space lifecycle, `createTab`/`listTabs` (windowless agent WebContents owned by the session) and `getBrowserVersion` are live; `snapshot` is a Phase 3 stub.
+- Verified end to end by `host/scripts/probe-domain.mjs` (pipe-direct kernel probe).

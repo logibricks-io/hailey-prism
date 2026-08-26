@@ -3,6 +3,8 @@
 
 #include "prism/browser/spaces/space_manager.h"
 
+#include <algorithm>
+
 namespace prism {
 
 SpaceManager::SpaceManager() = default;
@@ -84,6 +86,37 @@ SpaceManager::Error SpaceManager::Close(int id) {
 const SpaceManager::Space* SpaceManager::Find(int id) const {
   auto it = spaces_.find(id);
   return it == spaces_.end() ? nullptr : &it->second;
+}
+
+SpaceManager::Error SpaceManager::AddTab(int space_id, TabRecord tab) {
+  auto it = spaces_.find(space_id);
+  if (it == spaces_.end()) {
+    return Error::kNotFound;
+  }
+  for (auto& existing : it->second.tabs) {
+    existing.active = false;
+  }
+  tab.active = true;
+  it->second.tabs.push_back(std::move(tab));
+  return Error::kNone;
+}
+
+bool SpaceManager::RemoveTab(const std::string& target_id) {
+  for (auto& [id, space] : spaces_) {
+    auto tab_it = std::find_if(
+        space.tabs.begin(), space.tabs.end(),
+        [&](const TabRecord& tab) { return tab.target_id == target_id; });
+    if (tab_it == space.tabs.end()) {
+      continue;
+    }
+    const bool was_active = tab_it->active;
+    space.tabs.erase(tab_it);
+    if (was_active && !space.tabs.empty()) {
+      space.tabs.back().active = true;
+    }
+    return true;
+  }
+  return false;
 }
 
 }  // namespace prism

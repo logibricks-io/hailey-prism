@@ -53,13 +53,48 @@ try {
   const ver = await cdp.send("Prism.getBrowserVersion");
   check("Prism.getBrowserVersion", !!ver.currentVersion, ver.currentVersion);
 
-  // Unselected-session guard: a fresh connection probing snapshot must fail
-  // with the contract's not-selected code.
+  // Real WebContents creation: a hidden agent tab in the selected space.
+  const tab = await cdp.send("Prism.createTab", { url: "https://example.com" });
+  check("Prism.createTab", typeof tab.targetId === "string" && tab.targetId.length > 0,
+    tab.targetId);
+
+  // Navigation is async; createTab returns before the load commits.
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+
+  const tabs = await cdp.send("Prism.listTabs");
+  const listed = tabs.tabs?.find((t) => t.targetId === tab.targetId);
+  check("Prism.listTabs (created tab present)",
+    !!listed && listed.url.startsWith("https://example.com") && listed.active === true,
+    JSON.stringify(tabs.tabs));
+
+  // Standard CDP interop: the targetId must be attachable as a page target.
+  const attached = await cdp.send("Target.attachToTarget", { targetId: tab.targetId, flatten: true });
+  check("Target.attachToTarget", !!attached.sessionId, attached.sessionId);
+
+  const evaluated = await cdp.send("Runtime.evaluate",
+    { expression: "document.title", returnByValue: true }, attached.sessionId);
+  check("Runtime.evaluate document.title",
+    evaluated.result?.value?.includes("Example Domain"),
+    JSON.stringify(evaluated.result?.value));
+
+  try {
+    await cdp.send("Target.detachFromTarget", { sessionId: attached.sessionId });
+  } catch { /* detach is best-effort in the probe */ }
+
   try {
     await cdp.send("Prism.closeTaskSpace");
     check("Prism.closeTaskSpace", true);
   } catch (error) {
     check("Prism.closeTaskSpace", false, error.message);
+  }
+
+  // Post-close guard: the session no longer has a selected space.
+  try {
+    await cdp.send("Prism.listTabs");
+    check("Prism.listTabs (unselected after close)", false, "expected rejection");
+  } catch (error) {
+    check("Prism.listTabs (unselected after close)",
+      error.message.includes("PRISM_TASK_SPACE_NOT_SELECTED"), error.message);
   }
 } catch (error) {
   check("unexpected transport failure", false, error.message);

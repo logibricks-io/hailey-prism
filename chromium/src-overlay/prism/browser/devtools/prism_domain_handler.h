@@ -4,12 +4,20 @@
 #ifndef PRISM_BROWSER_DEVTOOLS_PRISM_DOMAIN_HANDLER_H_
 #define PRISM_BROWSER_DEVTOOLS_PRISM_DOMAIN_HANDLER_H_
 
+#include <map>
 #include <memory>
 #include <optional>
+#include <string>
 
+#include "base/memory/weak_ptr.h"
 #include "content/browser/devtools/protocol/devtools_domain_handler.h"
 #include "content/browser/devtools/protocol/prism.h"
+#include "content/public/browser/web_contents_delegate.h"
 #include "prism/browser/spaces/space_manager.h"
+
+namespace content {
+class WebContents;
+}  // namespace content
 
 // Handles the custom Prism.* DevTools domain (prism/pdl/prism.pdl), the
 // kernel-side half of the prism binding contract (docs/binding-contract.md).
@@ -49,7 +57,8 @@ inline constexpr char kPrismVersionPlaceholder[] = "151.0.7922.174+prism-dev";
 namespace content::protocol {
 
 class PrismDomainHandler : public DevToolsDomainHandler,
-                           public Prism::Backend {
+                           public Prism::Backend,
+                           public content::WebContentsDelegate {
  public:
   PrismDomainHandler();
 
@@ -62,6 +71,9 @@ class PrismDomainHandler : public DevToolsDomainHandler,
   void Wire(UberDispatcher* dispatcher) override;
   void SetRenderer(int process_host_id,
                    RenderFrameHostImpl* frame_host) override;
+
+  // content::WebContentsDelegate (agent tabs):
+  void CloseContents(content::WebContents* source) override;
 
   // Prism::Backend — task spaces.
   Response ListTaskSpaces(
@@ -106,6 +118,10 @@ class PrismDomainHandler : public DevToolsDomainHandler,
                              std::optional<bool>* out_mandatory) override;
 
  private:
+  // Observes one agent tab so the space bookkeeping is pruned when the
+  // WebContents dies without the handler initiating it (defined in the .cc).
+  class TabObserver;
+
   // Builds the wire TaskSpace object from the manager record.
   static std::unique_ptr<Prism::TaskSpace> ToWire(
       const prism::SpaceManager::Space& space);
@@ -114,8 +130,26 @@ class PrismDomainHandler : public DevToolsDomainHandler,
   // space (none selected / gone / user in control).
   std::optional<Response> RequireSelectedSpace() const;
 
+  // Destroys the agent tab: stops observing it, deletes the WebContents and
+  // removes the space bookkeeping. No-op when the target id is unknown.
+  void DestroyTab(const std::string& target_id);
+
+  // TabObserver callback: the WebContents is already inside its destructor, so
+  // ownership is dropped without deleting. The observer entry is reaped on the
+  // next task turn to avoid mutating the observer list mid-notification.
+  void OnTabWebContentsDestroyed(content::WebContents* web_contents);
+  void ReapTabObserver(const std::string& target_id);
+
   prism::SpaceManager space_manager_;
   std::optional<int> selected_space_id_;
+
+  // Agent tabs created via Prism.createTab, owned by this handler/session and
+  // keyed by DevToolsAgentHost target id. Observers are declared (and thus
+  // destroyed) before the WebContents so teardown never re-enters the handler.
+  std::map<std::string, std::unique_ptr<TabObserver>> tab_observers_;
+  std::map<std::string, std::unique_ptr<content::WebContents>> tabs_;
+
+  base::WeakPtrFactory<PrismDomainHandler> weak_factory_{this};
 };
 
 }  // namespace content::protocol

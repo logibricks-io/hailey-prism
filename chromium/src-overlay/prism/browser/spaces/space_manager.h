@@ -28,6 +28,16 @@ class SpaceManager {
     kAgentDelegatedToUser, // handed off; user in control until take-over
   };
 
+  // A tab the space owns: an agent-created WebContents registered under the
+  // space. Pure bookkeeping (no content/ types); the DevTools domain handler
+  // owns the actual WebContents instances keyed by TabRecord::target_id.
+  struct TabRecord {
+    std::string target_id;  // DevToolsAgentHost id for the WebContents
+    std::string url;
+    std::string title;
+    bool active = false;    // the most recently created/focused tab
+  };
+
   struct Space {
     int id = 0;
     std::string task_id;  // string form of id, kept for wire symmetry
@@ -35,6 +45,7 @@ class SpaceManager {
     Owner created_by = Owner::kAgent;
     Ownership ownership = Ownership::kAgent;
     std::vector<std::string> recent_tab_titles;
+    std::vector<TabRecord> tabs;
   };
 
   enum class Error {
@@ -74,6 +85,17 @@ class SpaceManager {
   Error Close(int id);
 
   const Space* Find(int id) const;
+
+  // ---- tab bookkeeping ----
+
+  // Records a tab owned by the space. The new tab becomes the active one.
+  // Returns kNotFound when the space is absent.
+  Error AddTab(int space_id, TabRecord tab);
+
+  // Removes the tab from whichever space owns it. Returns false when no space
+  // has the tab. When the removed tab was the active one, the most recently
+  // recorded remaining tab (if any) becomes active.
+  bool RemoveTab(const std::string& target_id);
 
  private:
   std::map<int, Space> spaces_;

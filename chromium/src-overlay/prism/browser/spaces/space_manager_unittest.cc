@@ -71,4 +71,56 @@ TEST(SpaceManagerTest, CloseRemovesTheSpace) {
   EXPECT_EQ(manager.Find(id), nullptr);
 }
 
+TEST(SpaceManagerTest, AddTabMarksTheNewTabActive) {
+  SpaceManager manager;
+  auto created = manager.Create("demo", SpaceManager::Owner::kAgent);
+  const int id = created.space->id;
+
+  SpaceManager::TabRecord first;
+  first.target_id = "target-1";
+  first.url = "https://a.example/";
+  EXPECT_EQ(manager.AddTab(id, first), SpaceManager::Error::kNone);
+
+  SpaceManager::TabRecord second;
+  second.target_id = "target-2";
+  second.url = "https://b.example/";
+  EXPECT_EQ(manager.AddTab(id, second), SpaceManager::Error::kNone);
+
+  const SpaceManager::Space* space = manager.Find(id);
+  ASSERT_TRUE(space);
+  ASSERT_EQ(space->tabs.size(), 2u);
+  EXPECT_FALSE(space->tabs[0].active);
+  EXPECT_TRUE(space->tabs[1].active);
+}
+
+TEST(SpaceManagerTest, AddTabOnMissingSpaceIsNotFound) {
+  SpaceManager manager;
+  SpaceManager::TabRecord tab;
+  tab.target_id = "target-1";
+  EXPECT_EQ(manager.AddTab(999, tab), SpaceManager::Error::kNotFound);
+}
+
+TEST(SpaceManagerTest, RemoveTabPromotesThePreviousTab) {
+  SpaceManager manager;
+  auto created = manager.Create("demo", SpaceManager::Owner::kAgent);
+  const int id = created.space->id;
+
+  SpaceManager::TabRecord first;
+  first.target_id = "target-1";
+  SpaceManager::TabRecord second;
+  second.target_id = "target-2";
+  manager.AddTab(id, first);
+  manager.AddTab(id, second);
+
+  EXPECT_TRUE(manager.RemoveTab("target-2"));
+  const SpaceManager::Space* space = manager.Find(id);
+  ASSERT_TRUE(space);
+  ASSERT_EQ(space->tabs.size(), 1u);
+  EXPECT_TRUE(space->tabs[0].active);
+
+  EXPECT_FALSE(manager.RemoveTab("target-2"));
+  EXPECT_TRUE(manager.RemoveTab("target-1"));
+  EXPECT_TRUE(space->tabs.empty());
+}
+
 }  // namespace prism
