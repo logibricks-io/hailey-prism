@@ -1,0 +1,114 @@
+# Prism DevTools domain definition (PDL)
+#
+# This is the kernel-side contract surface of Prism: the harness's prism.*
+# bindings forward to these commands (docs/binding-contract.md). Registered as
+# a custom domain via the patch series (chromium/patches/).
+#
+# Error convention: failures use the standard CDP error channel; the message
+# carries the stable code prefix, e.g. "PRISM_TASK_SPACE_NOT_FOUND: ...".
+# Codes are the contract; wording may drift (binding-contract.md §3).
+
+experimental domain Prism
+
+  # A task space: an isolated browsing context owned by an agent or the user.
+  type TaskSpace extends object
+    properties
+      integer id
+      string taskId
+      string name
+      # "agent" | "user"
+      string createdBy
+      # "agent" | "user" | "agentDelegatedToUser"
+      string ownership
+      optional array of string recentTabTitles
+
+  type TabInfo extends object
+    properties
+      string targetId
+      string title
+      string url
+      boolean active
+      optional integer index
+
+  type SnapshotRef extends object
+    properties
+      integer backendNodeId
+      string role
+      string name
+
+  # ---- task space lifecycle ----
+
+  command listTaskSpaces
+    returns
+      array of TaskSpace taskSpaces
+
+  command createTaskSpace
+    parameters
+      string name
+    returns
+      TaskSpace taskSpace
+
+  # Selects the space this DevTools session operates on. Per-session state:
+  # listTabs/snapshot/raw-CDP target filtering apply to the selected space.
+  command useTaskSpace
+    parameters
+      integer id
+    returns
+      TaskSpace taskSpace
+
+  command claimTaskSpace
+    parameters
+      integer id
+      optional string name
+    returns
+      TaskSpace taskSpace
+
+  command completeTaskSpace
+    returns
+      boolean done
+
+  command closeTaskSpace
+    returns
+      boolean done
+
+  command handOffTaskSpace
+    returns
+      TaskSpace taskSpace
+
+  command takeOverTaskSpace
+    returns
+      TaskSpace taskSpace
+
+  # ---- tabs ----
+
+  command listTabs
+    returns
+      array of TabInfo tabs
+
+  command createTab
+    parameters
+      string url
+    returns
+      string targetId
+
+  # ---- snapshot (Phase 3 kernel renderer) ----
+
+  command snapshot
+    parameters
+      # "only_within_viewport" | "full_page" (harness forces full_page)
+      optional string scope
+      optional boolean includeActionMarks
+      optional boolean includeStableLocator
+      optional integer maxResultLength
+    returns
+      string content
+      array of SnapshotRef refs
+
+  # ---- version ----
+
+  command getBrowserVersion
+    returns
+      string currentVersion
+      boolean updateAvailable
+      optional string latestVersion
+      optional boolean mandatory

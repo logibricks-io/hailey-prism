@@ -1,0 +1,10 @@
+# Prism arm64 development build args.
+# Release/productization args (is_official_build, branding) land in Phase 2's
+# packaging step; see scripts/package.sh.
+is_debug = false
+dcheck_always_on = false
+symbol_level = 1
+target_cpu = "arm64"
+disable_nacl = true
+proprietary_codecs = true
+ffmpeg_branding = "Chrome"

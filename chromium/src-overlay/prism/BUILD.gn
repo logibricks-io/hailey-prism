@@ -1,0 +1,32 @@
+# Copyright 2026 The Prism Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license.
+
+import("//build/config/compiler/compiler.gni")
+
+source_set("prism") {
+  sources = [
+    "browser/spaces/space_manager.cc",
+    "browser/spaces/space_manager.h",
+  ]
+
+  deps = [
+    "//base",
+  ]
+
+  # DevTools handler + snapshot composer land here as they are implemented:
+  #   browser/devtools/prism_domain_handler.{h,cc}   (Phase 2, needs content/)
+  #   browser/snapshot/snapshot_composer.{h,cc}      (Phase 3, needs content/)
+}
+
+source_set("unit_tests") {
+  testonly = true
+  sources = [
+    "browser/spaces/space_manager_unittest.cc",
+  ]
+  deps = [
+    ":prism",
+    "//base",
+    "//base/test:test_support",
+    "//testing/gtest",
+  ]
+}
