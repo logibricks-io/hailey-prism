@@ -38,10 +38,13 @@ log "Prism chromium fetch (pin: $PRISM_PIN)"
 log "depot_tools : $DEPOT_TOOLS_PATH"
 log "checkout    : $PRISM_CHROMIUM_SRC"
 
-# Network robustness knobs for giant packs over HTTP.
+# Network robustness knobs for giant packs over HTTP. Note: server-side pack
+# generation for a repo this size can stay silent for minutes before the first
+# byte flows, so the stall detector must be generous (100 B/s for 15 min =
+# genuinely dead); anything tighter aborts healthy fetches.
 git config --global http.postBuffer 524288000 || true
-git config --global http.lowSpeedLimit 1000 || true   # abort transfers stalled below 1KB/s ...
-git config --global http.lowSpeedTime 120 || true     # ... for 120s, so the retry loop kicks in
+git config --global http.lowSpeedLimit 100 || true
+git config --global http.lowSpeedTime 900 || true
 
 # 1. depot_tools
 if [ ! -d "$DEPOT_TOOLS_PATH/.git" ]; then

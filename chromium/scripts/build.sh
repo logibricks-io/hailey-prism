@@ -13,7 +13,8 @@ ARGS_FILE="$PRISM_REPO_ROOT/chromium/args/args-$ARCH.gn"
 cd "$PRISM_CHROMIUM_SRC"
 
 echo "==> gn gen $OUT_DIR (args: $ARGS_FILE)"
-gn gen "$OUT_DIR" --args="$(tr '\n' ' ' < "$ARGS_FILE")"
+# Strip comments/blank lines: gn --args does not accept '#' comments inline.
+gn gen "$OUT_DIR" --args="$(grep -vE '^\s*(#|$)' "$ARGS_FILE" | tr '\n' ' ')"
 
 echo "==> autoninja chrome"
 autoninja -C "$OUT_DIR" chrome
