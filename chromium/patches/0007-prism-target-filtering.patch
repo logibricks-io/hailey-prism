@@ -1,0 +1,83 @@
+Subject: [PATCH 0007] Prism: filter Target.getTargets by the session's space
+
+With a task space selected on the session's root, Target.getTargets reports
+only browser targets, the space's tab targets, and their subframe targets —
+each client sees its own space, not other clients'. With no space selected
+(bootstrap traffic) the list is unfiltered.
+
+diff --git a/content/browser/devtools/protocol/target_handler.cc b/content/browser/devtools/protocol/target_handler.cc
+index f051aaf1c5..161f698899 100644
+--- a/content/browser/devtools/protocol/target_handler.cc
++++ b/content/browser/devtools/protocol/target_handler.cc
+@@ -3,6 +3,8 @@
+ // found in the LICENSE file.
+ 
+ #include "content/browser/devtools/protocol/target_handler.h"
++#include "prism/browser/devtools/prism_domain_handler.h"
++#include <set>
+ 
+ #include <algorithm>
+ #include <memory>
+@@ -1431,6 +1433,32 @@ Response TargetHandler::CreateTarget(
+   return Response::Success();
+ }
+ 
++namespace {
++
++// Prism (patch 0007): a target is visible to a space-selected session when it
++// is a browser target, is one of the space's tabs, or is a subframe of one.
++bool PrismTargetVisible(content::DevToolsAgentHost* host,
++                        const std::set<std::string>& tab_ids) {
++  if (tab_ids.count(host->GetId())) {
++    return true;
++  }
++  if (host->GetType() == content::DevToolsAgentHost::kTypeBrowser) {
++    return true;
++  }
++  // Subframe targets link to their parent frame target; walk up bounded.
++  std::string hop = host->GetParentId();
++  for (int depth = 0; !hop.empty() && depth < 8; ++depth) {
++    if (tab_ids.count(hop)) {
++      return true;
++    }
++    auto* parent = content::DevToolsAgentHost::GetForId(hop).get();
++    hop = parent ? parent->GetParentId() : std::string();
++  }
++  return false;
++}
++
++}  // namespace
++
+ Response TargetHandler::GetTargets(
+     std::unique_ptr<protocol::Array<protocol::Target::FilterEntry>> filter,
+     std::unique_ptr<protocol::Array<Target::TargetInfo>>* target_infos) {
+@@ -1444,8 +1472,29 @@ Response TargetHandler::GetTargets(
+   const TargetFilter* effective_filter =
+       passed_filter ? passed_filter.get() : discover_target_filter_.get();
+   DCHECK(effective_filter);
++
++  // Prism (patch 0007): with a space selected on this session's root, only
++  // that space's tabs are visible — plus browser targets and those tabs'
++  // subframes. No selection means bootstrap traffic: no filtering.
++  std::optional<std::set<std::string>> prism_space_targets;
++  if (DevToolsSession* s = session()) {
++    DevToolsSession* root = s->GetRootSession();
++    DevToolsSession* policy_session = root ? root : s;
++    auto& handlers = policy_session->handlers();
++    auto it = handlers.find(protocol::Prism::Metainfo::domainName);
++    if (it != handlers.end()) {
++      prism_space_targets = static_cast<protocol::PrismDomainHandler*>(
++                                it->second.get())
++                                ->SelectedSpaceTargetIds();
++    }
++  }
++
+   *target_infos = std::make_unique<protocol::Array<Target::TargetInfo>>();
+   for (const auto& host : DevToolsAgentHost::GetOrCreateAll()) {
++    if (prism_space_targets.has_value() &&
++        !PrismTargetVisible(host.get(), *prism_space_targets)) {
++      continue;
++    }
+     if (effective_filter->Match(*host)) {
+ #if !BUILDFLAG(IS_ANDROID)
+       // Do not return initial WebUI as the DevTools targets.

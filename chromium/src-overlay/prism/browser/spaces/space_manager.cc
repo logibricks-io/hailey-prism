@@ -5,10 +5,18 @@
 
 #include <algorithm>
 
+#include "base/no_destructor.h"
+
 namespace prism {
 
 SpaceManager::SpaceManager() = default;
 SpaceManager::~SpaceManager() = default;
+
+// static
+SpaceManager* SpaceManager::GetInstance() {
+  static base::NoDestructor<SpaceManager> instance;
+  return instance.get();
+}
 
 std::vector<SpaceManager::Space> SpaceManager::List() const {
   std::vector<Space> out;
@@ -117,6 +125,43 @@ bool SpaceManager::RemoveTab(const std::string& target_id) {
     return true;
   }
   return false;
+}
+
+}  // namespace prism
+
+// --- Phase 4 additions ---------------------------------------------------
+
+namespace prism {
+
+void SpaceManager::UpdateTab(const std::string& target_id,
+                             const std::string& title,
+                             const std::string& url) {
+  for (auto& [id, space] : spaces_) {
+    for (auto& tab : space.tabs) {
+      if (tab.target_id == target_id) {
+        tab.title = title;
+        tab.url = url;
+        return;
+      }
+    }
+  }
+}
+
+SpaceManager::Error SpaceManager::SetAgentTaskState(int space_id,
+                                                    const std::string& label) {
+  auto it = spaces_.find(space_id);
+  if (it == spaces_.end()) {
+    return Error::kNotFound;
+  }
+  it->second.agent_task_state = label;
+  return Error::kNone;
+}
+
+void SpaceManager::SetWindowShown(int space_id, bool shown) {
+  auto it = spaces_.find(space_id);
+  if (it != spaces_.end()) {
+    it->second.window_shown = shown;
+  }
 }
 
 }  // namespace prism

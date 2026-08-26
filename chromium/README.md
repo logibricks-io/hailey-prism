@@ -46,11 +46,13 @@ transfer.
 
 ## src-overlay/prism status
 
-- `pdl/prism.pdl` — full `Prism.*` domain definition (design-complete).
-- `browser/spaces/space_manager.{h,cc}` + unittest — the ownership state machine plus per-space tab bookkeeping (pure logic, no content/ deps).
-- `browser/devtools/prism_domain_handler.{h,cc}` — compiled into content/browser via the patch series. Task-space lifecycle, `createTab`/`listTabs` (windowless agent WebContents owned by the session), `getBrowserVersion` and `snapshot` are all live.
+- `pdl/prism.pdl` — full `Prism.*` domain definition (spaces, tabs, Phase 4 space windows + agent state, snapshot, version).
+- `browser/spaces/space_manager.{h,cc}` + unittest — the ownership state machine plus per-space tab bookkeeping; browser-process singleton (`GetInstance`) since Phase 4 (the registry is global; selection stays per DevTools session).
+- `browser/spaces/space_window_delegate.{h,cc}` — the injection point (option B layering) through which chrome/ provides space windows; chrome side lives in `chrome/browser/prism/` (src-overlay), registered from `RegisterChromeWebUIConfigs`.
+- `browser/devtools/prism_domain_handler.{h,cc}` — compiled into content/browser via the patch series. Task-space lifecycle, tabs, snapshot, agent state, version are live. Also exports the per-session policy hooks used by patch 0006 (handoff gating) and patch 0007 (getTargets filtering).
 - `browser/snapshot/snapshot_composer.{h,cc}` (+ unittest) — pure-logic contract-snapshot composer: per-frame AX trees → one text tree, refs, loc=/url= annotations, viewport filtering, cross-process iframe splicing with same-process-inline-copy pruning.
 - `browser/snapshot/snapshot_job.{h,cc}` — the async Phase 3 kernel renderer driver (compiled into content/browser via patch 0005): walks the frame tree, attaches an internal DevTools session per local-root frame, pulls `Accessibility.getFullAXTree` (real backendDOMNodeIds), resolves iframe owners (`DOM.getFrameOwner`), viewport boxes (`DOM.getBoxModel`, per-frame coordinates — an approximation for nested frames), then composes.
 - `version/` — `process_version` template generating `prism_version_values.h` (PRISM_PRODUCT_NAME / PRISM_PRODUCT_VERSION from the pinned `chrome/VERSION` + active BRANDING); consumed by `getBrowserVersion`.
 - `browser/agent_socket/agent_socket_server.{h,cc}` — unix socket listener (default `~/Library/Application Support/Prism/agent.sock` when no `--user-data-dir` is given; per-profile `<user-data-dir>/prism-agent.sock` otherwise, so parallel instances never stomp each other; override `--prism-agent-socket=<path>`; 0700 dir / 0600 socket). Every accepted client gets its own DevToolsPipeHandler session (NUL-framed JSON, same wire format as `--remote-debugging-pipe`), which is what isolates each agent client's Prism.* selected-space state. Started from `BrowserMainLoop::PreMainMessageLoopRun`, always on.
-- Verified end to end by `host/scripts/probe-domain.mjs` (pipe + socket kernel probes, parallel-client isolation).
+- Chrome layer (src-overlay): `chrome/browser/prism/` (space window delegate + constants) and `chrome/browser/ui/webui/prism_spaces/` (chrome://prism-spaces management page; plain HTML/JS, no framework; data via chrome.send).
+- Verified end to end by `host/scripts/probe-domain.mjs` (pipe + socket kernel probes, parallel clients, snapshot fixtures, Phase 4 handoff demo).

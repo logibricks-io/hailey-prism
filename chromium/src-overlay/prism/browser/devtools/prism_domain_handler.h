@@ -7,6 +7,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 
 #include "base/memory/weak_ptr.h"
@@ -96,6 +97,13 @@ class PrismDomainHandler : public DevToolsDomainHandler,
                         out_tabs) override;
   Response CreateTab(const String& in_url, String* out_targetId) override;
 
+  // Prism::Backend — Phase 4: space windows + agent state.
+  Response ShowTaskSpace(int in_id, bool* out_done) override;
+  Response SetAgentTaskState(const String& in_label, bool* out_done) override;
+  Response AnimationHighlightMouseToPosition(int in_x,
+                                             int in_y,
+                                             bool* out_done) override;
+
   // Prism::Backend — snapshot (Phase 3 kernel renderer; async — registered
   // with "async" in protocol_config.json).
   void Snapshot(std::optional<String> in_scope,
@@ -109,6 +117,16 @@ class PrismDomainHandler : public DevToolsDomainHandler,
                              bool* out_updateAvailable,
                              std::optional<String>* out_latestVersion,
                              std::optional<bool>* out_mandatory) override;
+
+  // DevToolsSession policy hook (patch 0006): true when this raw CDP command
+  // must be rejected because the selected space is user-controlled.
+  // `out_error` gets the wire message (PRISM_ prefixed).
+  bool ShouldBlockCommand(const std::string& method, std::string* out_error);
+
+  // Target.getTargets filter (patch 0007): when a space is selected, the set
+  // of that space's tab target ids; nullopt when nothing is selected (no
+  // filtering — bootstrap).
+  std::optional<std::set<std::string>> SelectedSpaceTargetIds() const;
 
  private:
   // Observes one agent tab so the space bookkeeping is pruned when the
@@ -138,7 +156,7 @@ class PrismDomainHandler : public DevToolsDomainHandler,
   void OnTabWebContentsDestroyed(content::WebContents* web_contents);
   void ReapTabObserver(const std::string& target_id);
 
-  prism::SpaceManager space_manager_;
+  raw_ptr<prism::SpaceManager> space_manager_;  // global singleton, UI thread
   std::optional<int> selected_space_id_;
 
   // Agent tabs created via Prism.createTab, owned by this handler/session and

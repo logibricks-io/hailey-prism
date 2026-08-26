@@ -25,6 +25,10 @@ experimental domain Prism
       # "agent" | "user" | "agentDelegatedToUser"
       string ownership
       optional array of string recentTabTitles
+      # Agent-visible status label (Phase 4); empty when unset.
+      optional string agentTaskState
+      # Whether a visible browser window currently hosts the space's tabs.
+      optional boolean windowShown
 
   type TabInfo extends object
     properties
@@ -94,6 +98,38 @@ experimental domain Prism
       string url
     returns
       string targetId
+
+  # ---- Phase 4: space windows + agent state ----
+
+  # Opens (or focuses) a visible browser window hosting the space's current
+  # tabs; the windowless WebContents move into it. Calling again after more
+  # createTab calls pulls the new tabs into the same window. Window/UX action,
+  # not page-driving: stays allowed while the space is handed off (the user is
+  # exactly who needs to look).
+  command showTaskSpace
+    parameters
+      integer id
+    returns
+      boolean done
+
+  # Sets the agent's status label for the selected space; shown in the space
+  # window and on chrome://prism-spaces. Display-only: allowed while handed
+  # off (lets the agent say "waiting for you").
+  command setAgentTaskState
+    parameters
+      string label
+    returns
+      boolean done
+
+  # Brief click-highlight marker at page coordinates (x, y) of the selected
+  # space's window; no-op while the space is not shown. Driving-adjacent:
+  # rejected while the space is user-controlled.
+  command animationHighlightMouseToPosition
+    parameters
+      integer x
+      integer y
+    returns
+      boolean done
 
   # ---- snapshot (Phase 3 kernel renderer) ----
 

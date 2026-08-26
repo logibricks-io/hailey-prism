@@ -24,6 +24,8 @@ source_set("prism") {
     "browser/snapshot/snapshot_composer.h",
     "browser/spaces/space_manager.cc",
     "browser/spaces/space_manager.h",
+    "browser/spaces/space_window_delegate.cc",
+    "browser/spaces/space_window_delegate.h",
   ]
 
   deps = [

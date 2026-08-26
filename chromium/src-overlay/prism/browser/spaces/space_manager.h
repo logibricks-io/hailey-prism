@@ -46,6 +46,11 @@ class SpaceManager {
     Ownership ownership = Ownership::kAgent;
     std::vector<std::string> recent_tab_titles;
     std::vector<TabRecord> tabs;
+    // Agent-set status label (Prism.setAgentTaskState); shown in the
+    // space window and on chrome://prism-spaces.
+    std::string agent_task_state;
+    // Whether a visible browser window currently hosts the space's tabs.
+    bool window_shown = false;
   };
 
   enum class Error {
@@ -61,6 +66,12 @@ class SpaceManager {
 
   SpaceManager();
   ~SpaceManager();
+
+  // Browser-process-wide registry (leaky singleton, UI thread). The space
+  // registry must be global — per-session managers gave every client its own
+  // id namespace, so spaces could neither be listed nor addressed across
+  // sessions (and chrome-layer surfaces need to read them).
+  static SpaceManager* GetInstance();
 
   std::vector<Space> List() const;
 
@@ -96,6 +107,16 @@ class SpaceManager {
   // has the tab. When the removed tab was the active one, the most recently
   // recorded remaining tab (if any) becomes active.
   bool RemoveTab(const std::string& target_id);
+
+  // Refreshes a tab's live title/url (from its WebContents at listTabs time).
+  void UpdateTab(const std::string& target_id, const std::string& title,
+                 const std::string& url);
+
+  // Sets the agent-visible status label of the space.
+  Error SetAgentTaskState(int space_id, const std::string& label);
+
+  // Marks whether a visible window hosts the space.
+  void SetWindowShown(int space_id, bool shown);
 
  private:
   std::map<int, Space> spaces_;

@@ -112,8 +112,10 @@ async function connectSocketCdp(sockPath) {
   return new CdpConnection(new PipeTransport({ writeStream: socket, readStream: socket }));
 }
 
-// Two concurrent socket clients must not see each other's spaces or tabs:
-// the kernel's selected-space state is per DevTools session.
+// Two concurrent socket clients: per-session selection keeps each client's
+// tabs to its own selected space by default; the space registry itself is
+// global (Phase 4), so spaces are listable across clients and an agent-owned
+// space can be deliberately shared via useTaskSpace.
 async function runParallelIsolation(sockPath) {
   const a = await connectSocketCdp(sockPath);
   const b = await connectSocketCdp(sockPath);
@@ -133,23 +135,24 @@ async function runParallelIsolation(sockPath) {
     check("socket: client B sees only its own tab",
       listB.includes(tabB) && !listB.includes(tabA), JSON.stringify(listB));
 
-    // Space registries are per session too: B never saw A's space.
+    // Space registry is global (Phase 4): B can see A's space in the listing.
     const spacesB = (await b.send("Prism.listTaskSpaces")).taskSpaces.map((s) => s.name);
-    check("socket: client B cannot list client A's space",
-      spacesB.includes("client-b") && !spacesB.includes("client-a"), JSON.stringify(spacesB));
+    check("socket: client B lists client A's space (global registry)",
+      spacesB.includes("client-b") && spacesB.includes("client-a"), JSON.stringify(spacesB));
 
-    // Using the other client's space must fail. Space ids are per-session
-    // namespaces (both start at 1), so give A a second space: id 2 exists only
-    // in A's session, and B addressing it must be NOT_FOUND.
-    const spaceA2 = (await a.send("Prism.createTaskSpace", { name: "client-a-2" })).taskSpace;
-    let crossUse = null;
-    try {
-      await b.send("Prism.useTaskSpace", { id: spaceA2.id });
-    } catch (error) {
-      crossUse = error.message;
-    }
-    check("socket: cross-client useTaskSpace rejected",
-      !!crossUse?.includes("PRISM_TASK_SPACE_NOT_FOUND"), crossUse ?? "(unexpectedly allowed)");
+    // Selecting another client's agent-owned space works by design (shared
+    // spaces are how agents collaborate); the per-session selection keeps the
+    // clients apart by default. The user-owned case stays rejected.
+    const used = await b.send("Prism.useTaskSpace", { id: spaceA.id });
+    check("socket: cross-client useTaskSpace of an agent space works",
+      used.taskSpace?.id === spaceA.id, JSON.stringify(used.taskSpace));
+    // ...and its tabs become visible to the selecting client.
+    const sharedTabs = (await b.send("Prism.listTabs")).tabs.map((t) => t.targetId);
+    check("socket: selecting a shared space shows its tabs",
+      sharedTabs.includes(tabA), JSON.stringify(sharedTabs));
+
+    // Restore each client's own selection before the shared cleanup.
+    await b.send("Prism.useTaskSpace", { id: spaceB.id });
 
     await a.send("Prism.closeTaskSpace");
     await b.send("Prism.closeTaskSpace");
@@ -272,6 +275,135 @@ async function startIframeFixture() {
   };
 }
 
+// Phase 4 suite: space windows, the chrome://prism-spaces management page,
+// agent task state, handoff gating, getTargets filtering, and a scripted
+// user-vs-agent handoff demo (the "user" is a second client on the
+// profile-scoped agent socket).
+async function runPhase4Suite(cdp, profileDir) {
+  // --- visible space window ---
+  const space = (await cdp.send("Prism.createTaskSpace", { name: "phase4-space" })).taskSpace;
+  await cdp.send("Prism.useTaskSpace", { id: space.id });
+  const tabA = (await cdp.send("Prism.createTab", { url: "about:blank" })).targetId;
+
+  const shown = await cdp.send("Prism.showTaskSpace", { id: space.id });
+  check("phase4: showTaskSpace opens a window", shown.done === true, JSON.stringify(shown));
+
+  const targets = (await cdp.send("Target.getTargets")).targetInfos;
+  check("phase4: getTargets shows the space tab after the move",
+    targets.some((t) => t.targetId === tabA && t.type === "page"),
+    targets.map((t) => `${t.type}`).join(","));
+
+  // --- getTargets filtering across spaces ---
+  const other = (await cdp.send("Prism.createTaskSpace", { name: "phase4-other" })).taskSpace;
+  await cdp.send("Prism.useTaskSpace", { id: other.id });
+  const tabB = (await cdp.send("Prism.createTab", { url: "about:blank" })).targetId;
+  const targetsB = (await cdp.send("Target.getTargets")).targetInfos;
+  check("phase4: getTargets filtered to the selected space",
+    targetsB.some((t) => t.targetId === tabB) && !targetsB.some((t) => t.targetId === tabA),
+    targetsB.filter((t) => t.type === "page").map((t) => t.targetId.slice(0, 8)).join(","));
+
+  // --- management page data (agentTaskState + tab titles + ownership) ---
+  const pageTab = (await cdp.send("Prism.createTab", { url: "chrome://prism-spaces" })).targetId;
+  const pageSession = (await cdp.send("Target.attachToTarget", { targetId: pageTab, flatten: true })).sessionId;
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  // The page renders into #list (WebUI renderers cannot fetch chrome://
+  // subresources, so data flows via chrome.send + CallJavascriptFunction).
+  const readText = () => cdp.send("Runtime.evaluate", {
+    expression: "document.getElementById('list')?.innerText ?? ''",
+    returnByValue: true,
+  }, pageSession).then((r) => r.result?.value ?? "");
+
+  let text = await readText();
+  check("phase4: management page lists both spaces with ownership",
+    text.includes("phase4-space") && text.includes("phase4-other") &&
+      text.includes("window open"),
+    text.split("\n").slice(0, 3).join(" / "));
+
+  await cdp.send("Prism.setAgentTaskState", { label: "running the phase-4 probe" });
+  await cdp.send("Runtime.evaluate", {
+    expression: "chrome.send('querySpaces')", returnByValue: true,
+  }, pageSession);
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  text = await readText();
+  check("phase4: setAgentTaskState visible on the management page",
+    text.includes("running the phase-4 probe"),
+    text.split("\n").find((l) => l.includes("phase-4 probe")) ?? "(absent)");
+
+  const wire = (await cdp.send("Prism.listTaskSpaces")).taskSpaces
+    .find((s) => s.id === other.id);
+  check("phase4: agentTaskState + windowShown on the wire",
+    wire?.agentTaskState === "running the phase-4 probe" && wire?.windowShown === false,
+    JSON.stringify(wire));
+
+  // --- handoff gating ---
+  const tabSession = (await cdp.send("Target.attachToTarget", { targetId: tabB, flatten: true })).sessionId;
+  await cdp.send("Prism.handOffTaskSpace");
+
+  let driveError = null;
+  try {
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 10, y: 10 }, tabSession);
+  } catch (error) {
+    driveError = error.message;
+  }
+  check("phase4: driving command rejected while user-controlled",
+    !!driveError?.includes("PRISM_TASK_SPACE_USER_IN_CONTROL"), driveError ?? "(allowed)");
+
+  // queries pass through during handoff
+  let queryOk = true;
+  try {
+    await cdp.send("Page.getFrameTree", {}, tabSession);
+  } catch (error) {
+    queryOk = false;
+  }
+  check("phase4: query command allowed while user-controlled", queryOk);
+
+  await cdp.send("Prism.takeOverTaskSpace");
+  let driveAfter = null;
+  try {
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 10, y: 10 }, tabSession);
+  } catch (error) {
+    driveAfter = error.message;
+  }
+  check("phase4: driving command works after takeOver", driveAfter === null, driveAfter ?? "(ok)");
+
+  // --- scripted user-vs-agent demo (user client = profile-scoped socket) ---
+  const userSock = path.join(profileDir, "prism-agent.sock");
+  const user = await connectSocketCdp(userSock).catch(() => null);
+  check("phase4: user client connects over the profile socket", !!user, userSock);
+  if (user) {
+    // The user's own browsing is plain CDP, unaffected by the agent's spaces.
+    const userTab = (await user.send("Target.createTarget", { url: "about:blank" })).targetId;
+    check("phase4: user browsing unaffected (own target created)", !!userTab, userTab);
+
+    // The user sees the agent's space on the management page (global
+    // registry) and takes control away from the agent.
+    await user.send("Prism.useTaskSpace", { id: other.id });
+    await user.send("Prism.handOffTaskSpace");
+
+    let agentDrive = null;
+    try {
+      await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 5 }, tabSession);
+    } catch (error) {
+      agentDrive = error.message;
+    }
+    check("phase4: demo — agent drive blocked after user handoff",
+      !!agentDrive?.includes("PRISM_TASK_SPACE_USER_IN_CONTROL"), agentDrive ?? "(allowed)");
+
+    await user.send("Prism.takeOverTaskSpace");  // user hands control back
+    let resumed = null;
+    try {
+      await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 5 }, tabSession);
+    } catch (error) {
+      resumed = error.message;
+    }
+    check("phase4: demo — agent resumes after handback", resumed === null, resumed ?? "(ok)");
+  }
+
+  await cdp.send("Prism.closeTaskSpace");  // phase4-other
+  await cdp.send("Prism.useTaskSpace", { id: space.id });
+  await cdp.send("Prism.closeTaskSpace");  // phase4-space (windowed tabs stay)
+}
+
 async function runPipeSuite(profileDir, fixture) {
   const child = spawnBrowser({ browserPath, profileDir });
   const transport = new PipeTransport({
@@ -282,6 +414,7 @@ async function runPipeSuite(profileDir, fixture) {
   try {
     await runSuite(cdp, "pipe");
     await runSnapshotSuite(cdp, fixture.originA, fixture.originB);
+    await runPhase4Suite(cdp, profileDir);
   } catch (error) {
     check("pipe: unexpected transport failure", false, error.message);
   } finally {

@@ -17,6 +17,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "prism/browser/snapshot/snapshot_job.h"
+#include "prism/browser/spaces/space_window_delegate.h"
 #include "prism/version/prism_version_values.h"
 #include "url/gurl.h"
 #include "url/url_constants.h"
@@ -81,7 +82,8 @@ class PrismDomainHandler::TabObserver : public content::WebContentsObserver {
 };
 
 PrismDomainHandler::PrismDomainHandler()
-    : DevToolsDomainHandler(Prism::Metainfo::domainName) {}
+    : DevToolsDomainHandler(Prism::Metainfo::domainName),
+      space_manager_(prism::SpaceManager::GetInstance()) {}
 
 PrismDomainHandler::~PrismDomainHandler() {
   // Stop observing before the WebContents are torn down (member destruction
@@ -115,7 +117,7 @@ void PrismDomainHandler::DestroyTab(const std::string& target_id) {
   // WebContentsDestroyed, which must not re-enter here.
   tab_observers_.erase(target_id);
   tabs_.erase(target_id);
-  space_manager_.RemoveTab(target_id);
+  space_manager_->RemoveTab(target_id);
 }
 
 void PrismDomainHandler::OnTabWebContentsDestroyed(
@@ -130,7 +132,7 @@ void PrismDomainHandler::OnTabWebContentsDestroyed(
     const std::string target_id = it->first;
     it->second.release();
     tabs_.erase(it);
-    space_manager_.RemoveTab(target_id);
+    space_manager_->RemoveTab(target_id);
     base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE,
         base::BindOnce(&PrismDomainHandler::ReapTabObserver,
@@ -156,13 +158,15 @@ std::unique_ptr<Prism::TaskSpace> PrismDomainHandler::ToWire(
       .SetCreatedBy(CreatedByToWire(space.created_by))
       .SetOwnership(OwnershipToWire(space.ownership))
       .SetRecentTabTitles(std::move(titles))
+      .SetAgentTaskState(space.agent_task_state)
+      .SetWindowShown(space.window_shown)
       .Build();
 }
 
 Response PrismDomainHandler::ListTaskSpaces(
     std::unique_ptr<protocol::Array<Prism::TaskSpace>>* out_taskSpaces) {
   auto list = std::make_unique<protocol::Array<Prism::TaskSpace>>();
-  for (const auto& space : space_manager_.List()) {
+  for (const auto& space : space_manager_->List()) {
     list->emplace_back(ToWire(space));
   }
   *out_taskSpaces = std::move(list);
@@ -173,7 +177,7 @@ Response PrismDomainHandler::CreateTaskSpace(
     const String& in_name,
     std::unique_ptr<Prism::TaskSpace>* out_taskSpace) {
   auto result =
-      space_manager_.Create(in_name, prism::SpaceManager::Owner::kAgent);
+      space_manager_->Create(in_name, prism::SpaceManager::Owner::kAgent);
   *out_taskSpace = ToWire(*result.space);
   return Response::Success();
 }
@@ -181,7 +185,7 @@ Response PrismDomainHandler::CreateTaskSpace(
 Response PrismDomainHandler::UseTaskSpace(
     int in_id,
     std::unique_ptr<Prism::TaskSpace>* out_taskSpace) {
-  auto result = space_manager_.Use(in_id);
+  auto result = space_manager_->Use(in_id);
   if (result.error != prism::SpaceManager::Error::kNone) {
     return ErrorResponse(
         prism::WireCodeForSpaceError(result.error),
@@ -196,7 +200,7 @@ Response PrismDomainHandler::ClaimTaskSpace(
     int in_id,
     std::optional<String> in_name,
     std::unique_ptr<Prism::TaskSpace>* out_taskSpace) {
-  auto result = space_manager_.Claim(in_id, in_name.value_or(""));
+  auto result = space_manager_->Claim(in_id, in_name.value_or(""));
   if (result.error != prism::SpaceManager::Error::kNone) {
     return ErrorResponse(
         prism::WireCodeForSpaceError(result.error),
@@ -221,7 +225,7 @@ Response PrismDomainHandler::CloseTaskSpace(bool* out_done) {
   }
   // Destroy the space's agent tabs before removing the space itself
   // (DestroyTab prunes the per-tab bookkeeping).
-  if (const auto* space = space_manager_.Find(*selected_space_id_)) {
+  if (const auto* space = space_manager_->Find(*selected_space_id_)) {
     std::vector<std::string> target_ids;
     target_ids.reserve(space->tabs.size());
     for (const auto& tab : space->tabs) {
@@ -231,7 +235,7 @@ Response PrismDomainHandler::CloseTaskSpace(bool* out_done) {
       DestroyTab(target_id);
     }
   }
-  space_manager_.Close(*selected_space_id_);
+  space_manager_->Close(*selected_space_id_);
   selected_space_id_.reset();
   *out_done = true;
   return Response::Success();
@@ -242,7 +246,7 @@ Response PrismDomainHandler::HandOffTaskSpace(
   if (auto error = RequireSelectedSpace(/*allow_user_in_control=*/true)) {
     return *error;
   }
-  auto result = space_manager_.HandOff(*selected_space_id_);
+  auto result = space_manager_->HandOff(*selected_space_id_);
   *out_taskSpace = ToWire(*result.space);
   return Response::Success();
 }
@@ -252,7 +256,7 @@ Response PrismDomainHandler::TakeOverTaskSpace(
   if (auto error = RequireSelectedSpace(/*allow_user_in_control=*/true)) {
     return *error;
   }
-  auto result = space_manager_.TakeOver(*selected_space_id_);
+  auto result = space_manager_->TakeOver(*selected_space_id_);
   *out_taskSpace = ToWire(*result.space);
   return Response::Success();
 }
@@ -262,18 +266,27 @@ Response PrismDomainHandler::ListTabs(
   if (auto error = RequireSelectedSpace()) {
     return *error;
   }
-  const auto* space = space_manager_.Find(*selected_space_id_);
+  const auto* space = space_manager_->Find(*selected_space_id_);
   auto list = std::make_unique<protocol::Array<Prism::TabInfo>>();
   for (const auto& record : space->tabs) {
-    auto it = tabs_.find(record.target_id);
-    if (it == tabs_.end()) {
+    // Resolve live state globally, not via this session's ownership map: the
+    // registry is global (Phase 4), and a tab may belong to another client or
+    // have been moved into a visible window — its agent host survives both.
+    scoped_refptr<content::DevToolsAgentHost> host =
+        content::DevToolsAgentHost::GetForId(record.target_id);
+    content::WebContents* web_contents = host ? host->GetWebContents() : nullptr;
+    if (!web_contents) {
       continue;  // destroyed, bookkeeping reap pending
     }
-    content::WebContents* web_contents = it->second.get();
+    const std::string title = base::UTF16ToUTF8(web_contents->GetTitle());
+    const std::string url = web_contents->GetLastCommittedURL().spec();
+    // Keep the global bookkeeping fresh for cross-session readers (the
+    // management page reads SpaceManager directly, without live WebContents).
+    space_manager_->UpdateTab(record.target_id, title, url);
     list->emplace_back(Prism::TabInfo::Create()
                            .SetTargetId(record.target_id)
-                           .SetTitle(base::UTF16ToUTF8(web_contents->GetTitle()))
-                           .SetUrl(web_contents->GetLastCommittedURL().spec())
+                           .SetTitle(title)
+                           .SetUrl(url)
                            .SetActive(record.active)
                            .Build());
   }
@@ -328,7 +341,7 @@ Response PrismDomainHandler::CreateTab(const String& in_url,
   prism::SpaceManager::TabRecord record;
   record.target_id = target_id;
   record.url = url.spec();
-  space_manager_.AddTab(*selected_space_id_, std::move(record));
+  space_manager_->AddTab(*selected_space_id_, std::move(record));
 
   tab_observers_[target_id] =
       std::make_unique<TabObserver>(web_contents.get(), this);
@@ -336,6 +349,108 @@ Response PrismDomainHandler::CreateTab(const String& in_url,
 
   *out_targetId = target_id;
   return Response::Success();
+}
+
+Response PrismDomainHandler::ShowTaskSpace(int in_id, bool* out_done) {
+  auto* delegate = prism::GetSpaceWindowDelegate();
+  if (!delegate) {
+    return ErrorResponse(prism::kErrOperationFailed,
+                         "space windows unsupported in this build");
+  }
+  if (!space_manager_->Find(in_id)) {
+    return ErrorResponse(prism::kErrNotFound,
+                         base::StrCat({"task space: ", base::NumberToString(in_id)}));
+  }
+
+  // Hand the space's windowless tabs to the chrome layer. Ownership moves to
+  // the browser window's tab strip; the bookkeeping records stay (they are
+  // the space's tab list, whatever owns the WebContents).
+  std::vector<std::unique_ptr<content::WebContents>> moving;
+  const auto* space = space_manager_->Find(in_id);
+  for (const auto& record : space->tabs) {
+    auto it = tabs_.find(record.target_id);
+    if (it != tabs_.end()) {
+      moving.push_back(std::move(it->second));
+      tabs_.erase(it);
+    }
+  }
+  delegate->ShowTaskSpace(in_id, std::move(moving));
+  space_manager_->SetWindowShown(in_id, true);
+  *out_done = true;
+  return Response::Success();
+}
+
+Response PrismDomainHandler::SetAgentTaskState(const String& in_label,
+                                               bool* out_done) {
+  if (auto error = RequireSelectedSpace(/*allow_user_in_control=*/true)) {
+    return *error;
+  }
+  auto result = space_manager_->SetAgentTaskState(*selected_space_id_, in_label);
+  if (result != prism::SpaceManager::Error::kNone) {
+    return ErrorResponse(prism::WireCodeForSpaceError(result),
+                         "selected task space is gone");
+  }
+  *out_done = true;
+  return Response::Success();
+}
+
+Response PrismDomainHandler::AnimationHighlightMouseToPosition(int in_x,
+                                                               int in_y,
+                                                               bool* out_done) {
+  if (auto error = RequireSelectedSpace()) {
+    return *error;
+  }
+  if (auto* delegate = prism::GetSpaceWindowDelegate()) {
+    delegate->AnimateClickHighlight(*selected_space_id_, in_x, in_y);
+  }
+  *out_done = true;
+  return Response::Success();
+}
+
+bool PrismDomainHandler::ShouldBlockCommand(const std::string& method,
+                                            std::string* out_error) {
+  if (!selected_space_id_.has_value()) {
+    return false;  // bootstrap: no space selected yet, no policy to enforce
+  }
+  const auto* space = space_manager_->Find(*selected_space_id_);
+  if (!space ||
+      space->ownership != prism::SpaceManager::Ownership::kAgentDelegatedToUser) {
+    return false;
+  }
+  // Driving (page-affecting) command prefixes; queries pass through.
+  static constexpr const char* kDrivingPrefixes[] = {
+      "Input.",        "Page.navigate",   "Page.reload",
+      "Runtime.evaluate", "Runtime.callFunctionOn", "Runtime.callMethodOn",
+      "Target.createTarget", "Target.closeTarget", "Target.activateTarget",
+      "Browser.setDownloadBehavior", "Emulation.set", "Network.set",
+      "Fetch.enable",  "Debugger.",
+  };
+  for (const char* prefix : kDrivingPrefixes) {
+    if (method.starts_with(prefix)) {
+      *out_error = base::StrCat(
+          {prism::kErrUserInControl,
+           ": command blocked while the task space is controlled by the user: ",
+           method});
+      return true;
+    }
+  }
+  return false;
+}
+
+std::optional<std::set<std::string>>
+PrismDomainHandler::SelectedSpaceTargetIds() const {
+  if (!selected_space_id_.has_value()) {
+    return std::nullopt;
+  }
+  const auto* space = space_manager_->Find(*selected_space_id_);
+  if (!space) {
+    return std::nullopt;
+  }
+  std::set<std::string> ids;
+  for (const auto& tab : space->tabs) {
+    ids.insert(tab.target_id);
+  }
+  return ids;
 }
 
 void PrismDomainHandler::Snapshot(
@@ -354,7 +469,7 @@ void PrismDomainHandler::Snapshot(
   // A freshly selected space may have no tab yet. Resolve an empty snapshot
   // (not an error): the harness's agent-control probe reads this as "agent
   // owns an empty space".
-  const auto* space = space_manager_.Find(*selected_space_id_);
+  const auto* space = space_manager_->Find(*selected_space_id_);
   content::WebContents* web_contents = nullptr;
   for (const auto& record : space->tabs) {
     if (record.active) {
@@ -423,7 +538,7 @@ std::optional<Response> PrismDomainHandler::RequireSelectedSpace(
   if (!selected_space_id_.has_value()) {
     return ErrorResponse(prism::kErrNotSelected, "no task space selected");
   }
-  const auto* space = space_manager_.Find(*selected_space_id_);
+  const auto* space = space_manager_->Find(*selected_space_id_);
   if (!space) {
     return ErrorResponse(prism::kErrNotFound, "selected task space is gone");
   }

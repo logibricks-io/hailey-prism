@@ -1,0 +1,15 @@
+# Copyright 2026 The Prism Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license.
+
+# Header-only target: lets the WebUI page reference the delegate interface
+# constants without dragging the ui-heavy implementation in.
+source_set("delegate_headers") {
+  sources = [
+    "prism_space_window_delegate.h",
+    "prism_spaces_ui_constants.h",
+  ]
+
+  public_deps = [
+    "//prism:prism",
+  ]
+}

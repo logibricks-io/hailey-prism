@@ -1,0 +1,56 @@
+Subject: [PATCH 0006] Prism: gate driving commands while a space is handed off
+
+DevToolsSession::DispatchProtocolMessageInternal consults the root session's
+PrismDomainHandler: when its selected space is in kAgentDelegatedToUser
+ownership, driving (page-affecting) raw CDP commands (Input.*, Page.navigate,
+Runtime.evaluate, Target mutations, ...) are rejected with a
+PRISM_TASK_SPACE_USER_IN_CONTROL-prefixed error; queries pass. Child frame
+sessions resolve policy through their root session.
+
+diff --git a/content/browser/devtools/devtools_session.cc b/content/browser/devtools/devtools_session.cc
+index 2ebf82b54b..2ec66f2b30 100644
+--- a/content/browser/devtools/devtools_session.cc
++++ b/content/browser/devtools/devtools_session.cc
+@@ -15,6 +15,7 @@
+ #include "content/public/browser/render_process_host.h"
+ #include "content/browser/devtools/protocol/devtools_domain_handler.h"
+ #include "content/browser/devtools/protocol/protocol.h"
++#include "prism/browser/devtools/prism_domain_handler.h"
+ #include "content/browser/devtools/render_frame_devtools_agent_host.h"
+ #include "content/public/browser/devtools_external_agent_proxy_delegate.h"
+ #include "content/public/browser/devtools_manager_delegate.h"
+@@ -392,6 +393,34 @@ void DevToolsSession::DispatchProtocolMessageInternal(
+     }
+   }
+ 
++  // Prism (patch 0006): while this session's root has a space handed off to
++  // the user, reject driving (page-affecting) commands with a PRISM_ prefixed
++  // error; queries pass through. The policy state lives on the root session's
++  // PrismDomainHandler (child frame sessions consult their root).
++  {
++    DevToolsSession* root = GetRootSession();
++    DevToolsSession* policy_session = root ? root : this;
++    auto& handlers = policy_session->handlers();
++    auto it = handlers.find(protocol::Prism::Metainfo::domainName);
++    if (it != handlers.end()) {
++      auto* prism_handler =
++          static_cast<protocol::PrismDomainHandler*>(it->second.get());
++      std::string error;
++      if (prism_handler->ShouldBlockCommand(
++              std::string(dispatchable.Method().begin(),
++                          dispatchable.Method().end()),
++              &error) &&
++          dispatchable.HasCallId()) {
++        DispatchProtocolMessageToClient(
++            crdtp::CreateErrorResponse(
++                dispatchable.CallId(),
++                crdtp::DispatchResponse::ServerError(error))
++                ->Serialize());
++        return;
++      }
++    }
++  }
++
+   DevToolsManagerDelegate* delegate =
+       DevToolsManager::GetInstance()->delegate();
+   if (delegate && !dispatchable.Method().empty()) {

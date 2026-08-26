@@ -1,0 +1,71 @@
+Subject: [PATCH 0008] Prism: space windows + chrome://prism-spaces page
+
+Wires the Phase 4 chrome layer:
+- chrome/browser/ui/BUILD.gn: compile the SpaceWindowDelegate
+  implementation (opens/focuses one Browser per space, moves the space's
+  windowless tabs into its tab strip, pins chrome://prism-spaces as the
+  identity tab, paints the click-highlight overlay widget)
+- chrome/browser/ui/webui/{BUILD.gn,prism_spaces/}: the management page —
+  plain HTML/JS served via a WebUIDataSource request filter (no grit),
+  SpaceManager data over data.json, actions over chrome.send
+
+New sources live in the src-overlay (chrome/browser/prism/,
+chrome/browser/ui/webui/prism_spaces/).
+
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+index 017a8c3ff7..a26f9a25f1 100644
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -677,6 +677,8 @@ static_library("ui") {
+     "//chrome/browser/ui/webui/about:impl",
+     "//chrome/browser/ui/webui/accessibility",
+     "//chrome/browser/ui/webui/accessibility:impl",
++    "//chrome/browser/ui/webui/prism_spaces",
++    "//chrome/browser/prism:delegate_headers",
+     "//chrome/browser/ui/webui/bluetooth_internals",
+     "//chrome/browser/ui/webui/browsing_topics",
+     "//chrome/browser/ui/webui/components",
+@@ -1412,6 +1414,10 @@ static_library("ui") {
+       "//chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc",
+       "browser.cc",
+       "browser.h",
++      # Prism: the Space window delegate (Phase 4).
++      "//chrome/browser/prism/prism_space_window_delegate.cc",
++      "//chrome/browser/prism/prism_space_window_delegate.h",
++      "//chrome/browser/prism/prism_spaces_ui_constants.h",
+       "browser_command_controller.cc",
+       "browser_command_controller.h",
+       "browser_commands.cc",
+diff --git a/chrome/browser/ui/webui/BUILD.gn b/chrome/browser/ui/webui/BUILD.gn
+index 9ad30f708e..0d4b026323 100644
+--- a/chrome/browser/ui/webui/BUILD.gn
++++ b/chrome/browser/ui/webui/BUILD.gn
+@@ -61,6 +61,7 @@ source_set("configs") {
+     "//chrome/browser/ui",
+     "//chrome/browser/ui/webui/about",
+     "//chrome/browser/ui/webui/accessibility",
++    "//chrome/browser/ui/webui/prism_spaces",
+     "//chrome/browser/ui/webui/actor_internals",
+     "//chrome/browser/ui/webui/autofill_and_password_manager_internals",
+     "//chrome/browser/ui/webui/browsing_topics",
+diff --git a/chrome/browser/ui/webui/chrome_web_ui_configs.cc b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
+index 184305a45a..f845aa84a2 100644
+--- a/chrome/browser/ui/webui/chrome_web_ui_configs.cc
++++ b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
+@@ -12,6 +12,7 @@
+ #include "chrome/browser/optimization_guide/optimization_guide_internals_ui.h"
+ #include "chrome/browser/ui/webui/about/about_ui.h"
+ #include "chrome/browser/ui/webui/accessibility/accessibility_ui.h"
++#include "chrome/browser/ui/webui/prism_spaces/prism_spaces_ui.h"
+ #include "chrome/browser/ui/webui/actor_internals/actor_internals_ui.h"
+ #include "chrome/browser/ui/webui/autofill_and_password_manager_internals/autofill_internals_ui.h"
+ #include "chrome/browser/ui/webui/autofill_and_password_manager_internals/password_manager_internals_ui.h"
+@@ -253,6 +254,8 @@ void RegisterChromeWebUIConfigs() {
+ 
+   auto& map = content::WebUIConfigMap::GetInstance();
+   map.AddWebUIConfig(std::make_unique<AccessibilityUIConfig>());
++  // Prism: chrome://prism-spaces management page (Phase 4).
++  map.AddWebUIConfig(std::make_unique<prism::PrismSpacesUIConfig>());
+   map.AddWebUIConfig(std::make_unique<AutofillInternalsUIConfig>());
+   map.AddWebUIConfig(std::make_unique<BluetoothInternalsUIConfig>());
+   map.AddWebUIConfig(std::make_unique<BrowsingTopicsInternalsUIConfig>());

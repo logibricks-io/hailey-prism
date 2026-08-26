@@ -91,7 +91,7 @@ index 948ed05..67c81cb 100644
                                                           session->GetClient());
    session->CreateAndAddHandler<protocol::SystemInfoHandler>(
 diff --git a/content/browser/devtools/protocol_config.json b/content/browser/devtools/protocol_config.json
-index bd9457f779..fbf96307bd 100644
+index bd9457f779..531de502a6 100644
 --- a/content/browser/devtools/protocol_config.json
 +++ b/content/browser/devtools/protocol_config.json
 @@ -98,6 +98,11 @@
@@ -100,7 +100,7 @@ index bd9457f779..fbf96307bd 100644
              },
 +            {
 +                "domain": "Prism",
-+                "include": ["listTaskSpaces", "createTaskSpace", "useTaskSpace", "claimTaskSpace", "completeTaskSpace", "closeTaskSpace", "handOffTaskSpace", "takeOverTaskSpace", "listTabs", "createTab", "snapshot", "getBrowserVersion"],
++                "include": ["listTaskSpaces", "createTaskSpace", "useTaskSpace", "claimTaskSpace", "completeTaskSpace", "closeTaskSpace", "handOffTaskSpace", "takeOverTaskSpace", "listTabs", "createTab", "showTaskSpace", "setAgentTaskState", "animationHighlightMouseToPosition", "snapshot", "getBrowserVersion"],
 +                "async": ["snapshot"]
 +            },
              {
