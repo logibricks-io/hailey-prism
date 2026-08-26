@@ -41,6 +41,7 @@ std::string EscapeLocatorName(const std::string& name) {
 struct ComposedNode {
   raw_ptr<const SnapshotAXNode> ax =
       nullptr;  // null only for the virtual super-root
+  raw_ptr<const SnapshotFrameData> frame;  // the frame this node came from
   std::vector<ComposedNode> children;
 };
 
@@ -69,7 +70,7 @@ FrameTree BuildFrameTree(const SnapshotFrameData& frame) {
   return out;
 }
 
-bool InViewport(const SnapshotAXNode& node, const SnapshotOptions& options) {
+bool InViewport(const SnapshotAXNode& node, const SnapshotFrameData& frame) {
   if (!node.has_box) {
     return true;  // unknown geometry: keep (structure stays complete)
   }
@@ -78,8 +79,8 @@ bool InViewport(const SnapshotAXNode& node, const SnapshotOptions& options) {
   }
   const float right = node.box_x + node.box_w;
   const float bottom = node.box_y + node.box_h;
-  return right > 0 && bottom > 0 && node.box_x < options.viewport_width &&
-         node.box_y < options.viewport_height;
+  return right > 0 && bottom > 0 && node.box_x < frame.viewport_width &&
+         node.box_y < frame.viewport_height;
 }
 
 class Renderer {
@@ -98,7 +99,7 @@ class Renderer {
     }
     if (ax) {
       if (options_->only_within_viewport && ax->backend_node_id > 0 &&
-          !InViewport(*ax, *options_)) {
+          node.frame && !InViewport(*ax, *node.frame)) {
         return;  // off-viewport element: drop line and subtree
       }
       RenderLine(*ax, depth);
@@ -200,6 +201,7 @@ SnapshotResult ComposeSnapshot(const std::vector<SnapshotFrameData>& frames,
   std::function<void(const SnapshotAXNode*, int, ComposedNode*)> build;
   build = [&](const SnapshotAXNode* ax, int frame_index, ComposedNode* out) {
     out->ax = ax;
+    out->frame = &frames[frame_index];
     const FrameTree& own = frame_trees[frame_index];
     for (const auto& child_id : ax->child_ids) {
       auto it = own.by_id.find(child_id);

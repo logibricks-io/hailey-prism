@@ -148,8 +148,10 @@ void SnapshotJob::OnViewportDims(bool ok, const std::string& body) {
       parsed ? parsed->GetDict().FindListByDottedPath("result.value")
              : nullptr;
   if (dims && dims->size() == 2) {
-    options_.viewport_width = static_cast<float>((*dims)[0].GetDouble());
-    options_.viewport_height = static_cast<float>((*dims)[1].GetDouble());
+    frames_[current_frame_]->data.viewport_width =
+        static_cast<float>((*dims)[0].GetDouble());
+    frames_[current_frame_]->data.viewport_height =
+        static_cast<float>((*dims)[1].GetDouble());
   }
   RequestAXTree();
 }

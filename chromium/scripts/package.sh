@@ -90,3 +90,11 @@ hdiutil detach "$MOUNT_POINT" -quiet || true
 
 echo "==> done: $DMG_PATH"
 ls -lh "$DMG_PATH"
+
+# Stable channel name for the GitHub Releases "latest" asset that
+# skills/prism-browser/scripts/install.sh downloads. Release runbook: upload
+# Prism-mac-arm64.dmg and Prism-mac-x64.dmg as the release assets of the
+# latest release.
+STABLE_PATH="$DIST_DIR/Prism-mac-$ARCH.dmg"
+cp -f "$DMG_PATH" "$STABLE_PATH"
+echo "==> stable-name copy: $STABLE_PATH"

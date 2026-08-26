@@ -46,6 +46,10 @@ struct SnapshotFrameData {
   int parent_frame_index = -1;  // -1 for the top frame
   int owner_backend_node_id = 0;  // backendNodeId of the <iframe> element in
                                   // the parent frame; 0 for the top frame
+  // This frame's own viewport dims (each frame has its own — nested iframes
+  // are smaller than the page viewport).
+  float viewport_width = 0;
+  float viewport_height = 0;
   std::vector<SnapshotAXNode> nodes;
 };
 
@@ -56,8 +60,6 @@ struct SnapshotOptions {
   bool include_stable_locator = true;  // loc= annotations
   int max_result_length = 0;           // 0 = no truncation
   bool only_within_viewport = false;   // scope filter (needs box data)
-  float viewport_width = 0;
-  float viewport_height = 0;
 };
 
 struct SnapshotRefEntry {

@@ -1,0 +1,76 @@
+Subject: [PATCH 0009] Prism: chrome://prism-welcome first-run onboarding
+
+Registers the welcome page (src-overlay
+chrome/browser/ui/webui/prism_welcome/) and adds it as a first-run tab when
+the browser launches with a fresh profile and no command-line URLs —
+automation launches always carry a positional URL or --no-first-run, so the
+page only appears for real user launches.
+
+The page offers one-click import from the system Chrome (bookmarks + history
+via direct profile read — the upstream importer framework has no Chrome
+source importer on macOS; passwords/cookies/extensions stay behind Chrome's
+keychain ACL and are explicitly not touched) and from Safari/Firefox (stock
+framework). Skipping is side-effect free.
+
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+index a26f9a25f1..90952d43b6 100644
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -411,6 +411,7 @@ static_library("ui") {
+     # should be added to //chrome/browser:browser_generated_files.
+     ":accelerator_utils_headers",
+     ":simple_message_box_headers",
++    "//chrome/browser/ui/webui/prism_welcome",
+     "//chrome/browser:browser_public_dependencies",
+     "//chrome/browser:primitives",
+     "//chrome/browser/feedback",
+diff --git a/chrome/browser/ui/webui/BUILD.gn b/chrome/browser/ui/webui/BUILD.gn
+index 0d4b026323..03b8f98e10 100644
+--- a/chrome/browser/ui/webui/BUILD.gn
++++ b/chrome/browser/ui/webui/BUILD.gn
+@@ -107,6 +107,7 @@ source_set("configs") {
+     "//skia",
+     "//third_party/abseil-cpp:absl",
+     "//ui/webui:buildflags",
++    "//chrome/browser/ui/webui/prism_welcome",
+   ]
+ 
+   if (is_win || is_chromeos) {
+diff --git a/chrome/browser/ui/webui/chrome_web_ui_configs.cc b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
+index f1109b83bf..3d05b03045 100644
+--- a/chrome/browser/ui/webui/chrome_web_ui_configs.cc
++++ b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
+@@ -242,6 +242,7 @@
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+     BUILDFLAG(IS_CHROMEOS)
+ #include "chrome/browser/ui/webui/skills/skills_ui.h"
++#include "chrome/browser/ui/webui/prism_welcome/prism_welcome_ui.h"
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+         // BUILDFLAG(IS_CHROMEOS)
+ 
+@@ -510,5 +511,7 @@ void RegisterChromeWebUIConfigs() {
+   map.AddWebUIConfig(std::make_unique<skills::SkillsUIConfig>());
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+         // BUILDFLAG(IS_CHROMEOS)
++  // Prism: chrome://prism-welcome first-run onboarding (Phase 5).
++  map.AddWebUIConfig(std::make_unique<prism::PrismWelcomeUIConfig>());
+ 
+ }
+diff --git a/chrome/browser/chrome_browser_main.cc b/chrome/browser/chrome_browser_main.cc
+index a32949ed04..90b90122fd 100644
+--- a/chrome/browser/chrome_browser_main.cc
++++ b/chrome/browser/chrome_browser_main.cc
+@@ -1278,6 +1278,13 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
+     if (!base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kApp) &&
+         !base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kAppId)) {
+       browser_creator_->AddFirstRunTabs(master_prefs_->new_tabs);
++      // Prism: onboarding entry — chrome://prism-welcome offers importing
++      // browsing data from the system Chrome/Safari/Firefox (skip is fully
++      // side-effect free). Automation launches always carry a positional URL
++      // or --no-first-run, so this only shows for real user launches.
++      if (base::CommandLine::ForCurrentProcess()->GetArgs().empty()) {
++        browser_creator_->AddFirstRunTabs({GURL("chrome://prism-welcome")});
++      }
+     }
+   }
+ #endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS)

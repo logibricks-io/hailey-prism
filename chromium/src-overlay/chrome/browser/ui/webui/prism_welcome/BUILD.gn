@@ -1,0 +1,22 @@
+# Copyright 2026 The Prism Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license.
+
+source_set("prism_welcome") {
+  sources = [
+    "prism_welcome_ui.cc",
+    "prism_welcome_ui.h",
+  ]
+
+  public_deps = [
+    "//base",
+    "//content/public/browser",
+  ]
+
+  deps = [
+    "//chrome/browser:browser_public_dependencies",
+    "//chrome/browser/importer",
+    "//components/history/core/browser",
+    "//components/user_data_importer/common",
+    "//sql",
+  ]
+}

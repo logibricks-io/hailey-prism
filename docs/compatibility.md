@@ -32,6 +32,9 @@ ego-lite ships two helper namings:
 2. **`--doctor` / `--reload` / `upgrade`**: upstream ships in-repo stubs (injected by its app binary); Prism implements them for real in its own CLI.
 3. **Time units**: upstream's SKILL.md says "seconds" but the v2 code actually uses milliseconds. Prism follows the **code** (milliseconds), except `waitForAgentControl`'s `interval/timeout` and `fetch.*`'s `timeout`, which use seconds.
 4. **Brand & UI**: the Spaces management UI, icons, and copy are Prism's own design.
+5. **Agent socket path**: the kernel's agent control channel listens on a per-profile socket (`<user-data-dir>/prism-agent.sock`) when launched with `--user-data-dir`, falling back to the global `~/Library/Application Support/Prism/agent.sock` for the real app launch; override with `--prism-agent-socket=<path>`.
+6. **Kernel snapshot extras**: the kernel renderer (fork path) additionally annotates links with `url=<href>` and expands cross-process iframes inline; the adapter simulation path (stock Chromium) cannot see inside OOPIF iframes and emits no `url=` annotations. Refs remain backendNodeIds on both paths.
+7. **Windowless viewport**: fork agent tabs report a 1280×800 viewport by default (a hidden WebContents would otherwise be 0×0 and break hit-testing/screenshot math).
 
 ## Protocol invariants (zero drift allowed)
 

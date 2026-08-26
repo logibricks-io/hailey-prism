@@ -4,6 +4,7 @@
 import("//build/config/compiler/compiler.gni")
 import("//build/config/chrome_build.gni")
 import("//build/util/process_version.gni")
+import("//testing/test.gni")
 
 # Brand + version constants (PRISM_PRODUCT_NAME, PRISM_PRODUCT_VERSION),
 # generated from the pinned //chrome/VERSION and the active BRANDING file so
@@ -48,6 +49,23 @@ source_set("unit_tests") {
   deps = [
     ":prism",
     "//base",
+    "//base/test:run_all_unittests",
+    "//base/test:test_support",
+    "//testing/gtest",
+  ]
+}
+
+# Executable test binary for the pure-logic unit tests (source_set above only
+# compiles them).
+test("prism_unit_tests") {
+  sources = [
+    "browser/snapshot/snapshot_composer_unittest.cc",
+    "browser/spaces/space_manager_unittest.cc",
+  ]
+  deps = [
+    ":prism",
+    "//base",
+    "//base/test:run_all_unittests",
     "//base/test:test_support",
     "//testing/gtest",
   ]

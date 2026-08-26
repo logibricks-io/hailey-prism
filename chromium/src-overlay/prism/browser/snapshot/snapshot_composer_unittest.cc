@@ -47,9 +47,11 @@ TEST(SnapshotComposerTest, FlatTreeWithRefsAndLocators) {
             std::string::npos);
   EXPECT_NE(result.content.find("url=https://example.com/docs"),
             std::string::npos);
-  ASSERT_EQ(result.refs.size(), 2u);
-  EXPECT_EQ(result.refs[0].backend_node_id, 21);
-  EXPECT_EQ(result.refs[1].role, "link");
+  // Every node with a backendNodeId gets a ref (root included) — same as the
+  // JS composer.
+  ASSERT_EQ(result.refs.size(), 3u);
+  EXPECT_EQ(result.refs[0].backend_node_id, 10);
+  EXPECT_EQ(result.refs[2].role, "link");
 }
 
 TEST(SnapshotComposerTest, CrossProcessFrameSplicesUnderOwnerNode) {
@@ -74,7 +76,10 @@ TEST(SnapshotComposerTest, CrossProcessFrameSplicesUnderOwnerNode) {
   ASSERT_NE(owner_pos, std::string::npos);
   ASSERT_NE(inner_pos, std::string::npos);
   EXPECT_GT(inner_pos, owner_pos);
-  EXPECT_NE(result.content.find("\n    - button \"Inner\""), std::string::npos);
+  EXPECT_NE(result.content.find("\n      - button \"Inner\""), std::string::npos);
+  const std::string needle = "- button \"Inner\" [ref=61";
+  EXPECT_EQ(result.content.find(needle, result.content.find(needle) + 1),
+            std::string::npos);
 }
 
 TEST(SnapshotComposerTest, UnresolvableOwnerDropsChildFrame) {
@@ -124,9 +129,11 @@ TEST(SnapshotComposerTest, BackendIdCollisionAcrossProcessesDoesNotMisplace) {
   EXPECT_GT(result.content.find("Inner"),
             result.content.find("- InlineFrame"));
   EXPECT_GT(result.content.find("Inner"), result.content.find("Top heading"));
-  // Exactly one copy.
-  const size_t first = result.content.find("Inner");
-  EXPECT_EQ(result.content.find("Inner", first + 1), std::string::npos);
+  // Exactly one copy (the loc= annotation repeats the name; match the line).
+  const std::string line = "- button \"Inner\" [ref=61";
+  const size_t first = result.content.find(line);
+  ASSERT_NE(first, std::string::npos);
+  EXPECT_EQ(result.content.find(line, first + 1), std::string::npos);
 }
 
 TEST(SnapshotComposerTest, InlineCopyOfSplicedFrameIsPruned) {
@@ -162,11 +169,12 @@ TEST(SnapshotComposerTest, InlineCopyOfSplicedFrameIsPruned) {
   leaf.nodes = {leaf_root, leaf_button};
 
   auto result = ComposeSnapshot({top, mid, leaf}, {});
-  // Exactly one leaf occurrence, nested under mid's iframe.
-  size_t first = result.content.find("LeafAction");
-  EXPECT_NE(first, std::string::npos);
-  EXPECT_EQ(result.content.find("LeafAction", first + 1), std::string::npos);
-  EXPECT_NE(result.content.find("\n        - button \"LeafAction\""),
+  // Exactly one leaf button line, nested under mid's iframe.
+  const std::string line = "- button \"LeafAction\" [ref=81";
+  const size_t first = result.content.find(line);
+  ASSERT_NE(first, std::string::npos);
+  EXPECT_EQ(result.content.find(line, first + 1), std::string::npos);
+  EXPECT_NE(result.content.find("\n          - button \"LeafAction\""),
             std::string::npos);
   // The inline RootWebArea copy under the top frame is gone.
   EXPECT_EQ(result.content.find("\n  - RootWebArea \"Leaf\""), std::string::npos);
@@ -211,15 +219,16 @@ TEST(SnapshotComposerTest, ViewportFilterDropsOffscreenActionables) {
   Link(root, {"2", "3"});
   frame.nodes = {root, visible, offscreen};
 
+  frame.viewport_width = 1280;
+  frame.viewport_height = 800;
   SnapshotOptions options;
   options.only_within_viewport = true;
-  options.viewport_width = 1280;
-  options.viewport_height = 800;
   auto result = ComposeSnapshot({frame}, options);
   EXPECT_NE(result.content.find("Visible"), std::string::npos);
   EXPECT_EQ(result.content.find("Far"), std::string::npos);
-  ASSERT_EQ(result.refs.size(), 1u);
-  EXPECT_EQ(result.refs[0].backend_node_id, 21);
+  // refs: the root (no box, kept) + the visible button; the offscreen one goes.
+  ASSERT_EQ(result.refs.size(), 2u);
+  EXPECT_EQ(result.refs[1].backend_node_id, 21);
 }
 
 TEST(SnapshotComposerTest, StableLocatorCanBeDisabled) {

@@ -35,4 +35,10 @@ All repository content — code, comments, docs, commit messages — is **Englis
 
 ## Status
 
-Phase 1: harness vendored, agent workflow verified end-to-end against stock Chromium. See docs/architecture.md for the full roadmap.
+Phase 0–4 complete and verified on the fork (Prism.app): the Prism.* DevTools
+domain (task-space lifecycle, windowless agent tabs, kernel snapshot with
+cross-process iframe expansion), per-client agent socket, branding
+(Prism.app / com.logibricks.prism) with dmg packaging, and the Phase 4 space
+product surface (visible space windows, chrome://prism-spaces management page,
+handoff control gating). Phase 5 (distribution + onboarding) is in progress.
+See docs/architecture.md for the full roadmap.

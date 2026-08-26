@@ -15,6 +15,7 @@
 #include "content/public/browser/devtools_manager_delegate.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
+#include "ui/gfx/geometry/rect.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "prism/browser/snapshot/snapshot_job.h"
 #include "prism/browser/spaces/space_window_delegate.h"
@@ -331,6 +332,12 @@ Response PrismDomainHandler::CreateTab(const String& in_url,
   // Handles page-initiated window.close(); also required so the WebContents is
   // not leaked on unhandled delegate calls.
   web_contents->SetDelegate(this);
+
+  // A windowless WebContents otherwise keeps a 0x0 viewport, which breaks
+  // viewport math for agent work: elementFromPoint returns null (pointer
+  // clicks miss), screenshots come out empty, innerWidth/innerHeight read 0.
+  // Moving into a space window resizes it to the real window.
+  web_contents->Resize(gfx::Rect(0, 0, 1280, 800));
 
   content::NavigationController::LoadURLParams load_params(url);
   web_contents->GetController().LoadURLWithParams(load_params);
