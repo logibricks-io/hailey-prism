@@ -2,6 +2,21 @@
 # Use of this source code is governed by a BSD-style license.
 
 import("//build/config/compiler/compiler.gni")
+import("//build/config/chrome_build.gni")
+import("//build/util/process_version.gni")
+
+# Brand + version constants (PRISM_PRODUCT_NAME, PRISM_PRODUCT_VERSION),
+# generated from the pinned //chrome/VERSION and the active BRANDING file so
+# the kernel domain never drifts from the shipped build.
+process_version("generate_version") {
+  process_only = true
+  template_file = "version/prism_version_values.h.version"
+  sources = [
+    "//chrome/VERSION",
+    branding_file_path,
+  ]
+  output = "$target_gen_dir/version/prism_version_values.h"
+}
 
 source_set("prism") {
   sources = [
@@ -10,6 +25,7 @@ source_set("prism") {
   ]
 
   deps = [
+    ":generate_version",
     "//base",
   ]
 

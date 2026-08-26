@@ -4,6 +4,7 @@
 #ifndef PRISM_BROWSER_AGENT_SOCKET_AGENT_SOCKET_SERVER_H_
 #define PRISM_BROWSER_AGENT_SOCKET_AGENT_SOCKET_SERVER_H_
 
+#include <atomic>
 #include <map>
 #include <memory>
 
@@ -64,8 +65,9 @@ class AgentSocketServer {
     int fd = -1;
   };
 
-  // Accept thread entry point: blocking accept() loop; each accepted fd is
-  // handed to the UI thread.
+  // Accept thread entry point: poll the listen fd with a timeout so Stop()
+  // can join the thread promptly (shutdown() does not wake a blocked accept()
+  // on a listening socket — closing it mid-accept is not portable either).
   void AcceptLoop(int listen_fd);
   // UI thread: wraps the accepted fd in a DevToolsPipeHandler session.
   void OnConnectionAccepted(int fd);
@@ -73,6 +75,7 @@ class AgentSocketServer {
   void OnClientDisconnected(int connection_id);
 
   std::unique_ptr<base::Thread> accept_thread_;
+  std::atomic<bool> stop_accept_loop_{false};
   int listen_fd_ = -1;
   base::FilePath socket_path_;
   std::map<int, Connection> connections_;

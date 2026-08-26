@@ -24,7 +24,7 @@ const browserPath =
   process.env.PRISM_BROWSER_PATH ||
   path.join(
     os.homedir(),
-    "chromium/prism/src/out/Prism-arm64/Chromium.app/Contents/MacOS/Chromium",
+    "chromium/prism/src/out/Prism-arm64/Prism.app/Contents/MacOS/Prism",
   );
 
 let failures = 0;

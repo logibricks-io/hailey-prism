@@ -5,6 +5,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -110,6 +111,11 @@ void AgentSocketServer::Start() {
     return;
   }
   listen_fd_ = fd;
+  // Non-blocking: the accept loop polls with a timeout so Stop() can join the
+  // thread promptly (shutdown() does not wake a blocked accept() on a
+  // listening socket, and close() mid-accept is not portable).
+  int flags = fcntl(fd, F_GETFL);
+  fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 
   auto thread = std::make_unique<base::Thread>("PrismAgentSocketAccept");
   if (!thread->Start()) {
@@ -130,14 +136,13 @@ void AgentSocketServer::Stop() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   connections_.clear();  // DevToolsPipeHandler dtors shut their threads down.
 
+  stop_accept_loop_.store(true);
   if (listen_fd_ >= 0) {
-    // Unblocks the accept() loop so the thread exits.
-    shutdown(listen_fd_, SHUT_RDWR);
     close(listen_fd_);
     listen_fd_ = -1;
   }
   if (accept_thread_) {
-    accept_thread_->Stop();
+    accept_thread_->Stop();  // joins within one poll interval
     accept_thread_.reset();
   }
   if (!socket_path_.empty()) {
@@ -147,22 +152,33 @@ void AgentSocketServer::Stop() {
 }
 
 void AgentSocketServer::AcceptLoop(int listen_fd) {
-  while (true) {
-    const int fd = HANDLE_EINTR(accept(listen_fd, nullptr, nullptr));
-    if (fd < 0) {
-      // Stop() shuts the listener down (EINVAL/EBADF); ECONNABORTED is a
-      // client that hung up before we accepted. Any other accept error is
-      // logged and fatal to the loop — retrying would busy-spin.
-      if (errno != EINVAL && errno != EBADF && errno != ECONNABORTED) {
-        PLOG(ERROR) << "prism agent socket: accept()";
-      }
-      if (errno != ECONNABORTED) {
-        return;
-      }
+  while (!stop_accept_loop_.load()) {
+    pollfd pfd = {.fd = listen_fd, .events = POLLIN, .revents = 0};
+    const int ready = HANDLE_EINTR(poll(&pfd, 1, /*timeout_ms=*/200));
+    if (ready == 0) {
+      continue;  // timeout: re-check the stop flag
+    }
+    if (ready < 0 || (pfd.revents & (POLLERR | POLLNVAL))) {
+      return;  // Stop() closed the listener
+    }
+    if (!(pfd.revents & POLLIN)) {
       continue;
     }
-    // Keep the fd out of child processes (renderers).
+    const int fd = HANDLE_EINTR(accept(listen_fd, nullptr, nullptr));
+    if (fd < 0) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK || errno == ECONNABORTED) {
+        continue;  // raced with another accept / client hung up early
+      }
+      PLOG(ERROR) << "prism agent socket: accept()";
+      return;
+    }
+    // Keep the fd out of child processes (renderers), and force it back to
+    // blocking mode: on BSD/macOS accept() inherits O_NONBLOCK from the
+    // (polled) listener, and DevToolsPipeHandler's reader thread does
+    // blocking read()s that would instantly fail with EAGAIN.
     fcntl(fd, F_SETFD, FD_CLOEXEC);
+    const int acc_flags = fcntl(fd, F_GETFL);
+    fcntl(fd, F_SETFL, acc_flags & ~O_NONBLOCK);
     content::GetUIThreadTaskRunner({})->PostTask(
         FROM_HERE, base::BindOnce(&AgentSocketServer::OnConnectionAccepted,
                                   base::Unretained(this), fd));

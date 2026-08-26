@@ -16,6 +16,7 @@
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "prism/version/prism_version_values.h"
 #include "url/gurl.h"
 #include "url/url_constants.h"
 
@@ -358,7 +359,10 @@ Response PrismDomainHandler::GetBrowserVersion(
     bool* out_updateAvailable,
     std::optional<String>* out_latestVersion,
     std::optional<bool>* out_mandatory) {
-  *out_currentVersion = prism::kPrismVersionPlaceholder;
+  // Brand + pinned version from the generated prism_version_values.h
+  // (//prism:generate_version over //chrome/VERSION and the active BRANDING).
+  *out_currentVersion =
+      base::StrCat({PRISM_PRODUCT_NAME, "/", PRISM_PRODUCT_VERSION});
   *out_updateAvailable = false;
   return Response::Success();
 }

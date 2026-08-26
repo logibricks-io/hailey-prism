@@ -47,11 +47,6 @@ inline constexpr char kErrOperationFailed[] = "PRISM_OPERATION_FAILED";
 // Maps a SpaceManager error to its wire code.
 const char* WireCodeForSpaceError(SpaceManager::Error error);
 
-// Placeholder until version_info is wired from the chrome layer (the content
-// layer cannot see components/embedder_support). Pinned Chromium version +
-// dev marker.
-inline constexpr char kPrismVersionPlaceholder[] = "151.0.7922.174+prism-dev";
-
 }  // namespace prism
 
 namespace content::protocol {
