@@ -8,6 +8,10 @@
 # carries the stable code prefix, e.g. "PRISM_TASK_SPACE_NOT_FOUND: ...".
 # Codes are the contract; wording may drift (binding-contract.md §3).
 
+version
+  major 1
+  minor 0
+
 experimental domain Prism
 
   # A task space: an isolated browsing context owned by an agent or the user.

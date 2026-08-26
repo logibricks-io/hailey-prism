@@ -1,0 +1,106 @@
+Subject: [PATCH 0001] Register the custom Prism.* DevTools domain
+
+Wires prism/pdl/prism.pdl into the browser protocol build and registers
+PrismDomainHandler on browser-target sessions (AttachSession):
+- devtools/BUILD.gn: concatenate prism.pdl; generate protocol/prism.{cc,h}
+- protocol_config.json: list all 12 Prism commands (the generator only
+  emits domains configured here)
+- content/browser/BUILD.gn: compile the handler from //prism, dep on
+  //prism:prism, and compile the GENERATED prism.cc into the browser
+  target (missing this is a link error)
+- browser_devtools_agent_host.cc: CreateAndAddHandler in AttachSession
+
+Handler code lives in //prism (src-overlay). Verified with git apply
+--check against pin 151.0.7922.174.
+
+diff --git a/content/browser/devtools/BUILD.gn b/content/browser/devtools/BUILD.gn
+index c55c623..a1d5e87 100644
+--- a/content/browser/devtools/BUILD.gn
++++ b/content/browser/devtools/BUILD.gn
+@@ -80,6 +80,11 @@ action("concatenate_protocols") {
+     args += [ rebase_path(native_profiling_pdl, root_build_dir) ]
+   }
+ 
++  # Prism: fold the custom Prism.* domain into the browser protocol.
++  _prism_pdl = "//prism/pdl/prism.pdl"
++  inputs += [ _prism_pdl ]
++  args += [ rebase_path(_prism_pdl, root_build_dir) ]
++
+   args += [ rebase_path(output_file, root_build_dir) ]
+ }
+ 
+@@ -137,6 +142,8 @@ inspector_protocol_generate("protocol_sources") {
+     "protocol/page.h",
+     "protocol/preload.cc",
+     "protocol/preload.h",
++    "protocol/prism.cc",
++    "protocol/prism.h",
+     "protocol/protocol.h",
+     "protocol/runtime.cc",
+     "protocol/runtime.h",
+diff --git a/content/browser/BUILD.gn b/content/browser/BUILD.gn
+index 2c3a21e..6ed3bf9 100644
+--- a/content/browser/BUILD.gn
++++ b/content/browser/BUILD.gn
+@@ -117,6 +117,7 @@ source_set("browser") {
+     ":child_process_security_policy_impl",
+     "//base",
+     "//base:base_static",
++    "//prism:prism",
+     "//base:clang_profiling_buildflags",
+     "//base/tracing/protos:chrome_track_event_resources",
+     "//build:android_buildflags",
+@@ -430,6 +431,8 @@ source_set("browser") {
+     "$target_gen_dir/devtools/protocol/page.h",
+     "$target_gen_dir/devtools/protocol/preload.cc",
+     "$target_gen_dir/devtools/protocol/preload.h",
++    "$target_gen_dir/devtools/protocol/prism.cc",
++    "$target_gen_dir/devtools/protocol/prism.h",
+     "$target_gen_dir/devtools/protocol/protocol.h",
+     "$target_gen_dir/devtools/protocol/runtime.cc",
+     "$target_gen_dir/devtools/protocol/runtime.h",
+@@ -988,6 +991,8 @@ source_set("browser") {
+     "devtools/protocol/page_handler.h",
+     "devtools/protocol/preload_handler.cc",
+     "devtools/protocol/preload_handler.h",
++    "//prism/browser/devtools/prism_domain_handler.cc",
++    "//prism/browser/devtools/prism_domain_handler.h",
+     "devtools/protocol/schema_handler.cc",
+     "devtools/protocol/schema_handler.h",
+     "devtools/protocol/security_handler.cc",
+diff --git a/content/browser/devtools/browser_devtools_agent_host.cc b/content/browser/devtools/browser_devtools_agent_host.cc
+index 948ed05..67c81cb 100644
+--- a/content/browser/devtools/browser_devtools_agent_host.cc
++++ b/content/browser/devtools/browser_devtools_agent_host.cc
+@@ -22,6 +22,7 @@
+ #include "content/browser/devtools/protocol/protocol.h"
+ #include "content/browser/devtools/protocol/security_handler.h"
+ #include "content/browser/devtools/protocol/storage_handler.h"
++#include "prism/browser/devtools/prism_domain_handler.h"
+ #include "content/browser/devtools/protocol/system_info_handler.h"
+ #include "content/browser/devtools/protocol/target_handler.h"
+ #include "content/browser/devtools/protocol/tethering_handler.h"
+@@ -248,6 +249,8 @@ bool BrowserDevToolsAgentHost::AttachSession(DevToolsSession* session) {
+       base::BindRepeating([](base::OnceClosure cb) { std::move(cb).Run(); }));
+   session->CreateAndAddHandler<protocol::MemoryHandler>();
+   session->CreateAndAddHandler<protocol::SecurityHandler>();
++  // Prism: register the custom domain on every browser-target session.
++  session->CreateAndAddHandler<protocol::PrismDomainHandler>();
+   session->CreateAndAddHandler<protocol::StorageHandler>(this,
+                                                          session->GetClient());
+   session->CreateAndAddHandler<protocol::SystemInfoHandler>(
+diff --git a/content/browser/devtools/protocol_config.json b/content/browser/devtools/protocol_config.json
+index bd9457f..e2bce62 100644
+--- a/content/browser/devtools/protocol_config.json
++++ b/content/browser/devtools/protocol_config.json
+@@ -98,6 +98,10 @@
+                 "include": ["dumpProfilingDataOfAllProcesses"],
+                 "async": ["dumpProfilingDataOfAllProcesses"]
+             },
++            {
++                "domain": "Prism",
++                "include": ["listTaskSpaces", "createTaskSpace", "useTaskSpace", "claimTaskSpace", "completeTaskSpace", "closeTaskSpace", "handOffTaskSpace", "takeOverTaskSpace", "listTabs", "createTab", "snapshot", "getBrowserVersion"]
++            },
+             {
+                 "domain": "Network",
+                 "include": [
