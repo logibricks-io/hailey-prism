@@ -8,7 +8,7 @@ export function runCommand(command, args, options = {}) {
     const echo = options.echo !== false;
     const child = spawn(command, args, {
       cwd: options.cwd ?? process.cwd(),
-      env: process.env,
+      env: { ...process.env, ...options.env },
       stdio: options.input ? ["pipe", "pipe", "pipe"] : "inherit",
     });
     const timer =
@@ -26,14 +26,6 @@ export function runCommand(command, args, options = {}) {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
-      if (error.code === "ENOENT" && command === "prism-browser") {
-        reject(
-          new Error(
-            "prism-browser command not found; install/open prism lite before running real browser e2e",
-          ),
-        );
-        return;
-      }
       reject(error);
     });
     child.stdout?.on("data", (chunk) => {
@@ -48,33 +40,7 @@ export function runCommand(command, args, options = {}) {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
-      if (
-        /unknown option.*sdk-path|unrecognized option.*sdk-path/i.test(
-          stdout + stderr,
-        )
-      ) {
-        const error = new Error(
-          `prism-browser nodejs --sdk-path is not supported; cannot verify SDK path ${options.prismBrowserSdkPath || "configured SDK path"}`,
-        );
-        error.stdout = stdout;
-        error.stderr = stderr;
-        reject(error);
-        return;
-      }
       if (code === 0) {
-        if (
-          /prism's nodejs process exited with code\s+[1-9]\d*/.test(
-            stdout + stderr,
-          )
-        ) {
-          const error = new Error(
-            `prism-browser nodejs reported an inner failure while exiting 0`,
-          );
-          error.stdout = stdout;
-          error.stderr = stderr;
-          reject(error);
-          return;
-        }
         resolve({ stdout, stderr });
       } else {
         const error = new Error(

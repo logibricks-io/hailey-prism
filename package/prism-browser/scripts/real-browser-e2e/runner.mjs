@@ -17,8 +17,14 @@ import { runCommand } from "./run-command.mjs";
 
 const runnerDir = dirname(fileURLToPath(import.meta.url));
 const packageDir = join(runnerDir, "..", "..");
+const repoRoot = join(packageDir, "..", "..");
 const prismBrowserSdkPath = join(packageDir, "dist", "out", "index.js");
-const prismBrowserArgs = ["nodejs", "--sdk-path", prismBrowserSdkPath];
+// Cases run through the prism-host CLI (host/src/cli.js), which auto-launches
+// the host daemon and loads the harness bundle. PRISM_HARNESS_BUNDLE pins the
+// exact bundle built by this package so a shell-level override cannot leak in.
+const prismHostCliPath = join(repoRoot, "host", "src", "cli.js");
+const prismHostCommand = process.execPath;
+const prismHostArgs = [prismHostCliPath];
 const verboseCaseOutput =
   process.env.PRISM_BROWSER_REAL_E2E_VERBOSE_CASE_OUTPUT === "1" ||
   process.env.PRISM_BROWSER_REAL_E2E_VERBOSE_CASE_OUTPUT === "true";
@@ -33,6 +39,29 @@ export async function runRealBrowserE2e() {
       .map((name) => name.trim())
       .filter(Boolean),
   );
+  // Skip list: comma-separated case names in PRISM_BROWSER_REAL_E2E_SKIP, with
+  // optional human-readable reasons in PRISM_BROWSER_REAL_E2E_SKIP_REASONS (a
+  // JSON object mapping case name to reason). The repo-root e2e/run.mjs entry
+  // seeds these with the default host-adapter skip list.
+  const skipCases = new Set(
+    (process.env.PRISM_BROWSER_REAL_E2E_SKIP || "")
+      .split(",")
+      .map((name) => name.trim())
+      .filter(Boolean),
+  );
+  const skipReasons = parseSkipReasons(
+    process.env.PRISM_BROWSER_REAL_E2E_SKIP_REASONS,
+  );
+  const unknownSkipCases = [...skipCases].filter(
+    (name) => !e2eCases.some((testCase) => testCase.name === name),
+  );
+  if (unknownSkipCases.length > 0) {
+    console.error(
+      `Unknown PRISM_BROWSER_REAL_E2E_SKIP case(s): ${unknownSkipCases.join(", ")}`,
+    );
+    process.exitCode = 2;
+    return;
+  }
   const availableCaseNames = [
     "nodejs bridge smoke",
     ...e2eCases.map((testCase) => testCase.name),
@@ -80,11 +109,11 @@ export async function runRealBrowserE2e() {
     `;
     try {
       const { stdout, stderr } = await runCommand(
-        "prism-browser",
-        prismBrowserArgs,
+        prismHostCommand,
+        prismHostArgs,
         {
           cwd: packageDir,
-          prismBrowserSdkPath,
+          env: { PRISM_HARNESS_BUNDLE: prismBrowserSdkPath },
           echo: verboseCaseOutput,
           input: source,
           timeoutMs,
@@ -130,9 +159,9 @@ export async function runRealBrowserE2e() {
     const startedAt = Date.now();
     await rm(caseResultPath(tempDir), { force: true });
     try {
-      const { stdout } = await runCommand("prism-browser", prismBrowserArgs, {
+      const { stdout } = await runCommand(prismHostCommand, prismHostArgs, {
         cwd: packageDir,
-        prismBrowserSdkPath,
+        env: { PRISM_HARNESS_BUNDLE: prismBrowserSdkPath },
         echo: verboseCaseOutput,
         input: source,
         timeoutMs,
@@ -171,6 +200,12 @@ export async function runRealBrowserE2e() {
     if (onlyCases.size > 0 && !onlyCases.has(name)) {
       console.log(`-- ${name} (skipped)`);
       recordResult(name, "skip", 0, 0);
+      return;
+    }
+    if (skipCases.has(name)) {
+      const reason = skipReasons.get(name);
+      console.log(`-- ${name} (skipped${reason ? `: ${reason}` : ""})`);
+      recordResult(name, "skip", 0, 0, reason);
       return;
     }
     await runPrismCase(name, body, timeoutMs);
@@ -241,6 +276,7 @@ export async function runRealBrowserE2e() {
     console.log("== E2E (real browser helpers) ==");
     console.log(`fixture: ${context.baseUrl}`);
     console.log(`task: ${taskName}`);
+    console.log(`cli: ${prismHostCliPath}`);
     console.log(`sdk: ${prismBrowserSdkPath}`);
 
     await maybeRunNodeBridgeSmoke();
@@ -334,6 +370,24 @@ async function initializeE2eEnvironment(context, tempDir) {
   );
 }
 
+function parseSkipReasons(raw) {
+  const reasons = new Map();
+  if (!raw) return reasons;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") {
+      for (const [name, reason] of Object.entries(parsed)) {
+        if (typeof reason === "string" && reason) reasons.set(name, reason);
+      }
+    }
+  } catch {
+    console.error(
+      "Ignoring PRISM_BROWSER_REAL_E2E_SKIP_REASONS: not a valid JSON object",
+    );
+  }
+  return reasons;
+}
+
 function parseNodeBridgeSmoke(stdout, marker) {
   const lines = String(stdout || "")
     .split(/\r?\n/)
@@ -342,7 +396,7 @@ function parseNodeBridgeSmoke(stdout, marker) {
   const markerIndex = lines.indexOf(marker);
   if (markerIndex === -1) {
     throw new Error(
-      "nodejs bridge did not print the console.log smoke marker; prism-browser nodejs may have exited without executing stdin",
+      "nodejs bridge did not print the console.log smoke marker; the prism-host CLI may have exited without executing stdin",
     );
   }
   const payload = lines[markerIndex + 1];
@@ -380,7 +434,7 @@ async function readCaseResult(tempDir, stdout) {
     return {
       ok: false,
       assertions: extractAssertionCount(stdout),
-      error: `case-result.json was not written or readable; prism-browser nodejs may have exited without executing stdin (${error?.message || error})`,
+      error: `case-result.json was not written or readable; the prism-host CLI may have exited without executing stdin (${error?.message || error})`,
     };
   }
 }
