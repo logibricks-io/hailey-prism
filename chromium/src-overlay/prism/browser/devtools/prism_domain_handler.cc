@@ -206,7 +206,7 @@ Response PrismDomainHandler::ClaimTaskSpace(
 }
 
 Response PrismDomainHandler::CompleteTaskSpace(bool* out_done) {
-  if (auto error = RequireSelectedSpace()) {
+  if (auto error = RequireSelectedSpace(/*allow_user_in_control=*/true)) {
     return *error;
   }
   *out_done = true;
@@ -214,7 +214,7 @@ Response PrismDomainHandler::CompleteTaskSpace(bool* out_done) {
 }
 
 Response PrismDomainHandler::CloseTaskSpace(bool* out_done) {
-  if (auto error = RequireSelectedSpace()) {
+  if (auto error = RequireSelectedSpace(/*allow_user_in_control=*/true)) {
     return *error;
   }
   // Destroy the space's agent tabs before removing the space itself
@@ -237,7 +237,7 @@ Response PrismDomainHandler::CloseTaskSpace(bool* out_done) {
 
 Response PrismDomainHandler::HandOffTaskSpace(
     std::unique_ptr<Prism::TaskSpace>* out_taskSpace) {
-  if (auto error = RequireSelectedSpace()) {
+  if (auto error = RequireSelectedSpace(/*allow_user_in_control=*/true)) {
     return *error;
   }
   auto result = space_manager_.HandOff(*selected_space_id_);
@@ -247,7 +247,7 @@ Response PrismDomainHandler::HandOffTaskSpace(
 
 Response PrismDomainHandler::TakeOverTaskSpace(
     std::unique_ptr<Prism::TaskSpace>* out_taskSpace) {
-  if (auto error = RequireSelectedSpace()) {
+  if (auto error = RequireSelectedSpace(/*allow_user_in_control=*/true)) {
     return *error;
   }
   auto result = space_manager_.TakeOver(*selected_space_id_);
@@ -363,7 +363,8 @@ Response PrismDomainHandler::GetBrowserVersion(
   return Response::Success();
 }
 
-std::optional<Response> PrismDomainHandler::RequireSelectedSpace() const {
+std::optional<Response> PrismDomainHandler::RequireSelectedSpace(
+    bool allow_user_in_control) const {
   if (!selected_space_id_.has_value()) {
     return ErrorResponse(prism::kErrNotSelected, "no task space selected");
   }
@@ -371,7 +372,8 @@ std::optional<Response> PrismDomainHandler::RequireSelectedSpace() const {
   if (!space) {
     return ErrorResponse(prism::kErrNotFound, "selected task space is gone");
   }
-  if (space->ownership == prism::SpaceManager::Ownership::kAgentDelegatedToUser) {
+  if (!allow_user_in_control &&
+      space->ownership == prism::SpaceManager::Ownership::kAgentDelegatedToUser) {
     return ErrorResponse(prism::kErrUserInControl,
                          "task space is controlled by the user");
   }

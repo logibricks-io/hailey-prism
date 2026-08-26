@@ -1,0 +1,63 @@
+Subject: [PATCH 0002] Prism agent DevTools socket listener
+
+Starts prism::AgentSocketServer (//prism/browser/agent_socket) with the
+browser main loop. The listener accepts unix domain socket clients and gives
+each its own DevToolsPipeHandler session (NUL-framed JSON, identical wire
+format to --remote-debugging-pipe), so every agent client gets an isolated
+DevToolsSession with its own Prism.* selected-space state.
+
+- browser_main_loop.cc: Start() in PreMainMessageLoopRun, Stop() in
+  ShutdownThreadsAndCleanUp
+- content/browser/BUILD.gn: compile the server from //prism into the
+  content/browser target (it needs the internal DevToolsPipeHandler)
+
+diff --git a/content/browser/browser_main_loop.cc b/content/browser/browser_main_loop.cc
+diff --git a/content/browser/browser_main_loop.cc b/content/browser/browser_main_loop.cc
+index e605be3dfa..72105c2105 100644
+--- a/content/browser/browser_main_loop.cc
++++ b/content/browser/browser_main_loop.cc
+@@ -144,6 +144,8 @@
+ #include "net/log/net_log.h"
+ #include "net/socket/client_socket_factory.h"
+ #include "net/ssl/ssl_config_service.h"
++// Prism: the per-client agent DevTools socket listener (//prism).
++#include "prism/browser/agent_socket/agent_socket_server.h"
+ #include "services/audio/service.h"
+ #include "services/data_decoder/public/cpp/service_provider.h"
+ #include "services/data_decoder/public/mojom/data_decoder_service.mojom.h"
+@@ -1084,6 +1086,11 @@ int BrowserMainLoop::PreMainMessageLoopRun() {
+   base::DisallowUnresponsiveTasks();
+   responsiveness_watcher_ = new responsiveness::Watcher;
+   responsiveness_watcher_->SetUp();
++
++  // Prism: the agent socket listener is started unconditionally (not behind a
++  // switch): it is the primary control channel of the fork, and its
++  // permissions (0700 directory, 0600 socket file) scope it to the owner.
++  prism::AgentSocketServer::GetInstance()->Start();
+   return result_code_;
+ }
+ 
+@@ -1180,6 +1187,10 @@ void BrowserMainLoop::ShutdownThreadsAndCleanUp() {
+       base::BindOnce(base::IgnoreResult(
+           &base::PermanentThreadAllowance::AllowBaseSyncPrimitives)));
+ 
++  // Prism: stop accepting agent clients and drain live sessions before the
++  // DevTools subsystem goes away.
++  prism::AgentSocketServer::GetInstance()->Stop();
++
+   if (RenderProcessHost::run_renderer_in_process())
+     RenderProcessHostImpl::ShutDownInProcessRenderer();
+ 
+diff --git a/content/browser/BUILD.gn b/content/browser/BUILD.gn
+index 6ed3bf9102..5ea670c5f5 100644
+--- a/content/browser/BUILD.gn
++++ b/content/browser/BUILD.gn
+@@ -987,6 +987,8 @@ source_set("browser") {
+     "devtools/protocol/network_handler.h",
+     "devtools/protocol/overlay_handler.cc",
+     "devtools/protocol/overlay_handler.h",
++    "//prism/browser/agent_socket/agent_socket_server.cc",
++    "//prism/browser/agent_socket/agent_socket_server.h",
+     "devtools/protocol/page_handler.cc",
+     "devtools/protocol/page_handler.h",
+     "devtools/protocol/preload_handler.cc",

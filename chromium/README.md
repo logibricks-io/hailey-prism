@@ -45,4 +45,5 @@ transfer.
 - `pdl/prism.pdl` — full `Prism.*` domain definition (design-complete).
 - `browser/spaces/space_manager.{h,cc}` + unittest — the ownership state machine plus per-space tab bookkeeping (pure logic, no content/ deps).
 - `browser/devtools/prism_domain_handler.{h,cc}` — compiled into content/browser via the patch series. Task-space lifecycle, `createTab`/`listTabs` (windowless agent WebContents owned by the session) and `getBrowserVersion` are live; `snapshot` is a Phase 3 stub.
-- Verified end to end by `host/scripts/probe-domain.mjs` (pipe-direct kernel probe).
+- `browser/agent_socket/agent_socket_server.{h,cc}` — unix socket listener (default `~/Library/Application Support/Prism/agent.sock`, override `--prism-agent-socket=<path>`; 0700 dir / 0600 socket). Every accepted client gets its own DevToolsPipeHandler session (NUL-framed JSON, same wire format as `--remote-debugging-pipe`), which is what isolates each agent client's Prism.* selected-space state. Started from `BrowserMainLoop::PreMainMessageLoopRun`, always on.
+- Verified end to end by `host/scripts/probe-domain.mjs` (pipe + socket kernel probes, parallel-client isolation).

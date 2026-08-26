@@ -127,8 +127,13 @@ class PrismDomainHandler : public DevToolsDomainHandler,
       const prism::SpaceManager::Space& space);
 
   // Returns a DispatchResponse error when this session has no usable selected
-  // space (none selected / gone / user in control).
-  std::optional<Response> RequireSelectedSpace() const;
+  // space (none selected / gone / user in control). The lifecycle commands
+  // (complete/close/handOff/takeOver) pass allow_user_in_control=true: they
+  // are the management channel through which control is handed over and
+  // regained, so they must stay callable while the space is delegated — only
+  // driving commands (createTab/listTabs/snapshot) are gated on ownership.
+  std::optional<Response> RequireSelectedSpace(
+      bool allow_user_in_control = false) const;
 
   // Destroys the agent tab: stops observing it, deletes the WebContents and
   // removes the space bookkeeping. No-op when the target id is unknown.
