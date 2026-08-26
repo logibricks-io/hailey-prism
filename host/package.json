@@ -1,0 +1,14 @@
+{
+  "name": "prism-host",
+  "version": "0.1.0",
+  "description": "Prism browser host adapter: bridges the prism-browser harness bindings to Chromium over the DevTools pipe.",
+  "type": "module",
+  "bin": {
+    "prism-browser": "./src/cli.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "Proprietary",
+  "private": true
+}
