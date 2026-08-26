@@ -1,0 +1,12 @@
+prism-browser skill
+===================
+
+This directory (`skills/prism-browser/`) is vendored from ego-lite
+(https://github.com/citrolabs/ego-lite, `skills/ego-browser/`), which is
+distributed under the MIT License:
+
+    Copyright (c) 2026 CitroLabs
+
+All copyright in the vendored upstream content remains with the original
+ego-lite authors. Modifications made after vendoring are Copyright (c) 2026
+the Prism authors and are likewise released under the MIT License.

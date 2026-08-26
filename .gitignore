@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+artifacts/
+out/
+*.build.lock
+
+# Test/e2e artifacts
+case-result.json
+coverage/
+
+# OS
+.DS_Store
+
+# Local env
+.env
+.env.local
+
+# Chromium checkout lives outside the repo (see chromium/README.md);
+# never accidentally commit a synced src tree at the repo root.
+/src/
+third_party/depot_tools/

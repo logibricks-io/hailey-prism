@@ -1,0 +1,13 @@
+prism-browser
+=============
+
+This directory (`package/prism-browser/`) is vendored from ego-lite
+(https://github.com/citrolabs/ego-lite), which is distributed under the MIT
+License. The upstream copyright notice and license text are preserved verbatim
+in the LICENSE file in this directory:
+
+    Copyright (c) 2026 CitroLabs
+
+All copyright in the vendored upstream code remains with the original ego-lite
+authors. Modifications made after vendoring are Copyright (c) 2026 the Prism
+authors and are likewise released under the MIT License.
