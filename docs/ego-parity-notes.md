@@ -112,7 +112,18 @@ skills) is structurally equivalent; theirs is one static binary.
    (ownership → kUser; the agent can only re-enter by claiming). A 1s sync in
    the space-window delegate reconciles the banner and Dock badge with
    SpaceManager state, so CDP-driven handoffs surface without polling.
-4. Full Chrome data import (cookies/passwords/extensions) with first-run
-   user-present keychain authorization.
+4. ~~Full Chrome data import (cookies/passwords/extensions) with first-run
+   user-present keychain authorization~~ — **landed** (Phase 6): one click on
+   chrome://prism-welcome's "Import from Chrome" copies the "Chrome Safe
+   Storage" keychain seed into "Prism Safe Storage" (one macOS ACL prompt,
+   user-present) and stages Cookies/Login Data/Preferences/Secure
+   Preferences/Extensions for the next startup, so the copied v10
+   ciphertexts decrypt transparently — no decrypt/re-encrypt pass. Coverage
+   vs ego's advertised "logins, cookies, extensions, bookmarks": we match all
+   four and additionally import history (live-merged) and
+   Preferences/Secure Preferences. Not done in v1: multi-profile selection
+   (Default only), `Local Extension Settings`, Local State. Denial/missing
+   paths degrade to bookmarks+history with an honest per-item report. Full
+   security-boundary writeup: docs/chrome-import.md.
 5. Signed/notarized distribution + auto-update channel.
 6. x64 build. 7. Bare-Meta input isolation. 8. Channel publishing.

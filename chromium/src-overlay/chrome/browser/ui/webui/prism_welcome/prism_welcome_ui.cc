@@ -11,6 +11,7 @@
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
 #include "base/json/json_reader.h"
+#include "base/json/json_writer.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
@@ -19,6 +20,8 @@
 #include "chrome/browser/importer/external_process_importer_host.h"
 #include "chrome/browser/importer/importer_list.h"
 #include "chrome/browser/importer/profile_writer.h"
+#include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/prism/prism_chrome_importer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/user_data_importer/common/imported_bookmark_entry.h"
@@ -44,62 +47,145 @@ constexpr char kPageHtml[] = R"HTML(<!doctype html>
   :root { color-scheme: dark; }
   body { font-family: -apple-system, system-ui, sans-serif; background: #17141f;
          color: #ece9f4; margin: 0; display: flex; justify-content: center; }
-  .card { max-width: 520px; margin: 8vh 24px; background: #211c2e;
+  .card { max-width: 560px; margin: 6vh 24px; background: #211c2e;
           border: 1px solid #352c4a; border-radius: 16px; padding: 36px 40px; }
   h1 { font-size: 24px; font-weight: 650; margin: 0 0 6px; }
   h1 .mark { color: #b69cff; }
   p { color: #cfc8e3; font-size: 14px; line-height: 1.55; }
   .small { font-size: 12px; color: #a79fbd; }
-  .actions { display: flex; gap: 10px; margin-top: 22px; }
+  .actions { display: flex; gap: 10px; margin-top: 22px; flex-wrap: wrap; }
   button { border-radius: 9px; padding: 9px 18px; font-size: 13.5px;
            cursor: pointer; border: 1px solid #453a63; }
   .primary { background: #7c4dff; border-color: #7c4dff; color: white; }
   .primary:hover { background: #8f66ff; }
   .ghost { background: transparent; color: #cfc8e3; }
   #status { margin-top: 18px; font-size: 13px; color: #b69cff; min-height: 1.2em; }
+  #report { margin-top: 12px; font-size: 13px; }
+  #report .row { display: flex; gap: 8px; padding: 3px 0; align-items: baseline; }
+  #report .k { color: #cfc8e3; min-width: 150px; }
+  #report .ok { color: #8fd3a5; }
+  #report .skip { color: #a79fbd; }
+  #report .bad { color: #ff8a9b; }
+  #report .detail { color: #a79fbd; font-size: 12px; }
+  #restart { display: none; margin-top: 16px; }
+  #restart.show { display: inline-block; }
 </style></head><body>
 <div class="card">
   <h1>Welcome to <span class="mark">Prism</span></h1>
   <p>Prism is a browser for humans and AI agents sharing one browser: agents
      work in isolated task spaces, you stay in control, and you can watch or
      take over at any time from chrome://prism-spaces.</p>
-  <p>Bring your existing browsing data over from another browser — bookmarks
-     and history import in one click. Passwords, cookies and extensions are
-     not imported yet (they live behind the other browser's keychain
-     protection).</p>
+  <p>Bring your Chrome with you — bookmarks, history, cookies, passwords and
+     extensions. Cookies and passwords are encrypted by Chrome; migrating them
+     asks macOS once for access to "Chrome Safe Storage" in your keychain
+     (that's your login sessions coming along). Prism never writes into
+     Chrome's profile.</p>
   <div class="actions">
     <button class="primary" id="import-chrome">Import from Chrome</button>
     <button class="ghost" id="import-other">Import from Safari / Firefox</button>
     <button class="ghost" id="skip">Skip</button>
   </div>
   <div id="status"></div>
-  <p class="small">You can always do this later: open chrome://prism-welcome.</p>
+  <div id="report"></div>
+  <button class="primary" id="restart">Restart Prism to finish</button>
+  <p class="small">You can always do this later: open chrome://prism-welcome.
+     Importing replaces this fresh profile's empty data files; anything Prism
+     encrypted before the import becomes unreadable.</p>
 </div>
 <script src="app.js"></script>
 </body></html>)HTML";
 
 constexpr char kAppJs[] = R"JS(function $(id) { return document.getElementById(id); }
+const LABELS = {
+  bookmarks: "Bookmarks",
+  history: "History",
+  cookies: "Cookies (login state)",
+  passwords: "Passwords",
+  preferences: "Preferences",
+  securePreferences: "Secure Preferences",
+  extensions: "Extensions",
+};
+function row(kind, label, detail) {
+  const el = document.createElement("div");
+  el.className = "row";
+  const icon = document.createElement("span");
+  icon.className = kind;
+  icon.textContent = kind === "ok" ? "\u2713" : kind === "bad" ? "\u2717" : "\u2013";
+  const name = document.createElement("span");
+  name.className = "k";
+  name.textContent = label;
+  el.appendChild(icon);
+  el.appendChild(name);
+  if (detail) {
+    const d = document.createElement("span");
+    d.className = "detail";
+    d.textContent = detail;
+    el.appendChild(d);
+  }
+  $("report").appendChild(el);
+}
 $("import-chrome").addEventListener("click", () => {
-  $("status").textContent = "Importing bookmarks and history from Chrome…";
+  $("report").replaceChildren();
+  $("restart").className = "";
+  $("status").textContent = "Importing from Chrome\u2026 (macOS may ask once for keychain access)";
   chrome.send("importFromChrome");
 });
 $("import-other").addEventListener("click", () => {
-  $("status").textContent = "Looking for Safari / Firefox profiles…";
+  $("status").textContent = "Looking for Safari / Firefox profiles\u2026";
   chrome.send("importFromOther");
 });
 $("skip").addEventListener("click", () => window.close());
+$("restart").addEventListener("click", () => chrome.send("restartNow"));
 window.prismWelcome = {
   onStatus(text) { $("status").textContent = text; },
+  onImportReport(reportJson) {
+    const report = JSON.parse(reportJson);
+    window.__lastReport = report;
+    if (!report.chromeFound) {
+      $("status").textContent =
+          "No Chrome profile found (~/Library/Application Support/Google/Chrome/Default). Nothing imported.";
+      return;
+    }
+    for (const [key, label] of Object.entries(LABELS)) {
+      const item = report.items && report.items[key];
+      if (!item) continue;
+      let kind = "ok", detail = item.detail || "";
+      if (item.status === "ok") { kind = "ok"; }
+      else if (item.status === "missing") { kind = "skip"; detail = "not present"; }
+      else if (item.status.startsWith("skipped")) { kind = "skip"; detail = "keychain access denied"; }
+      else { kind = "bad"; detail = detail || item.status; }
+      row(kind, label, detail);
+    }
+    if (report.keychain === "copied") {
+      row("ok", "Keychain seed", "Chrome Safe Storage \u2192 Prism Safe Storage");
+    } else if (report.keychain === "denied") {
+      row("skip", "Keychain seed", "denied \u2014 cookies/passwords stay with Chrome");
+    } else if (report.keychain && !report.keychain.startsWith("skipped")) {
+      row("bad", "Keychain seed", report.keychain);
+    }
+    if (report.stagedForRestart) {
+      $("status").textContent = "Import staged. Restart to activate cookies, passwords and extensions.";
+      $("restart").className = "show";
+    } else if (report.keychain === "denied") {
+      $("status").textContent = "Imported bookmarks and history only (keychain access denied).";
+    } else {
+      $("status").textContent = "Import finished.";
+    }
+  },
 };)JS";
 
 // --------------------------- Chrome profile import --------------------------
 //
 // The upstream importer framework has no Chrome importer on macOS (it covers
-// Safari/Firefox there), so Prism reads Chrome's default profile directly:
-// bookmarks from the Bookmarks JSON, history from the History SQLite file.
-// Passwords/cookies stay out: they are encrypted with Chrome's Safe Storage
-// keychain item and reading them needs an interactive ACL prompt — deferred
-// (see docs).
+// Safari/Firefox there), so Prism reads Chrome's default profile directly.
+// Two lanes:
+//  - live merge (bookmarks + history, below) via ProfileWriter — no restart;
+//  - staged full import (cookies/passwords/preferences/extensions) via
+//    prism::StageChromeImport: Chrome's Safe Storage seed is copied into
+//    Prism's keychain item (one interactive ACL prompt) and the encrypted
+//    profile files are staged for the next startup (ApplyStagedChromeImport
+//    runs before profile services open them — an in-place copy would be
+//    clobbered by the running browser on shutdown).
 
 struct ChromeImportData {
   std::vector<user_data_importer::ImportedBookmarkEntry> bookmarks;
@@ -107,16 +193,24 @@ struct ChromeImportData {
   bool chrome_found = false;
 };
 
-base::FilePath ChromeDefaultProfileDir() {
-  base::FilePath home;
-  if (!base::PathService::Get(base::DIR_HOME, &home)) {
-    return {};
+struct ChromeImportResult {
+  base::DictValue report;  // staged import (keychain + encrypted files)
+  ChromeImportData live;   // bookmarks + history, merged below
+};
+
+void ReadChromeProfileDataInto(ChromeImportData* out);
+
+ChromeImportResult RunFullChromeImport(const base::FilePath& dest_profile_dir) {
+  ChromeImportResult result;
+  result.report = StageChromeImport(dest_profile_dir);
+  result.live.chrome_found =
+      !ChromeSourceProfileDir().empty() &&
+      base::PathExists(ChromeSourceProfileDir());
+  if (!result.live.chrome_found) {
+    return result;
   }
-  return home.Append("Library")
-      .Append("Application Support")
-      .Append("Google")
-      .Append("Chrome")
-      .Append("Default");
+  ReadChromeProfileDataInto(&result.live);
+  return result;
 }
 
 void CollectBookmarks(const base::DictValue& node,
@@ -156,14 +250,14 @@ void CollectBookmarks(const base::DictValue& node,
   }
 }
 
-ChromeImportData ReadChromeProfileData() {
-  ChromeImportData out;
-  const base::FilePath dir = ChromeDefaultProfileDir();
+void ReadChromeProfileDataInto(ChromeImportData* out) {
+  const base::FilePath dir = ChromeSourceProfileDir();
+  out->chrome_found = !dir.empty() && base::PathExists(dir);
 
   // Bookmarks (JSON).
   std::string bookmarks_json;
   if (base::ReadFileToString(dir.Append("Bookmarks"), &bookmarks_json)) {
-    out.chrome_found = true;
+    out->chrome_found = true;
     auto parsed = base::JSONReader::Read(bookmarks_json, base::JSON_PARSE_RFC);
     const base::DictValue* roots =
         parsed ? parsed->GetDict().FindDict("roots") : nullptr;
@@ -174,7 +268,7 @@ ChromeImportData ReadChromeProfileData() {
           continue;
         }
         const bool toolbar = root_name == "bookmark_bar";
-        CollectBookmarks(*root, {}, toolbar, &out);
+        CollectBookmarks(*root, {}, toolbar, out);
       }
     }
   }
@@ -183,7 +277,7 @@ ChromeImportData ReadChromeProfileData() {
   // then open the copy read-only.
   const base::FilePath history_db = dir.Append("History");
   if (base::PathExists(history_db)) {
-    out.chrome_found = true;
+    out->chrome_found = true;
     base::FilePath tmp_dir;
     if (base::CreateNewTempDirectory("prism-chrome-history", &tmp_dir)) {
       base::CopyFile(history_db, tmp_dir.Append("History"));
@@ -199,7 +293,7 @@ ChromeImportData ReadChromeProfileData() {
         row.set_last_visit(
             base::Time::FromDeltaSinceWindowsEpoch(
                 base::Microseconds(statement.ColumnInt64(3))));
-        out.history.push_back(std::move(row));
+        out->history.push_back(std::move(row));
       }
       db.Close();
     }
@@ -207,7 +301,6 @@ ChromeImportData ReadChromeProfileData() {
       base::DeletePathRecursively(tmp_dir);
     }
   }
-  return out;
 }
 
 }  // namespace
@@ -240,6 +333,15 @@ PrismWelcomeUI::PrismWelcomeUI(content::WebUI* web_ui)
       "importFromChrome",
       base::BindRepeating(&PrismWelcomeUI::OnImportFromChrome,
                           weak_factory_.GetWeakPtr()));
+  web_ui->RegisterMessageCallback(
+      "restartNow",
+      base::BindRepeating(
+          [](const base::ListValue&) {
+            // The staged import lands during the next startup, before the
+            // profile opens those files; OSCrypt then derives its key from
+            // the migrated seed.
+            chrome::AttemptRestart();
+          }));
   web_ui->RegisterMessageCallback(
       "importFromOther",
       base::BindRepeating(
@@ -285,36 +387,56 @@ void PrismWelcomeUI::OnSourceProfilesDetected() {
 void PrismWelcomeUI::OnImportFromChrome(const base::ListValue& args) {
   Profile* profile =
       Profile::FromBrowserContext(web_ui()->GetWebContents()->GetBrowserContext());
-  ReportStatus("Importing bookmarks and history from Chrome…");
+  ReportStatus("Importing from Chrome… (macOS may ask once for keychain access)");
   base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
-      base::BindOnce(&ReadChromeProfileData),
+      base::BindOnce(&RunFullChromeImport, profile->GetPath()),
       base::BindOnce(
           [](base::WeakPtr<PrismWelcomeUI> self, Profile* profile,
-             ChromeImportData data) {
+             ChromeImportResult result) {
             if (!self) {
               return;
             }
-            if (!data.chrome_found) {
-              self->ReportStatus(
-                  "No Chrome profile found (~/Library/Application Support/"
-                  "Google/Chrome/Default). Nothing to import.");
+            if (!result.live.chrome_found) {
+              std::string json;
+              base::JSONWriter::Write(base::Value(std::move(result.report)),
+                                      &json);
+              self->web_ui()->CallJavascriptFunctionUnsafe(
+                  "prismWelcome.onImportReport", base::ValueView(std::move(json)));
               return;
             }
-            scoped_refptr<ProfileWriter> writer = base::MakeRefCounted<ProfileWriter>(profile);
-            size_t imported = 0;
-            if (!data.bookmarks.empty()) {
-              writer->AddBookmarks(data.bookmarks, u"Imported from Chrome");
-              imported += data.bookmarks.size();
+            scoped_refptr<ProfileWriter> writer =
+                base::MakeRefCounted<ProfileWriter>(profile);
+            size_t bookmarks = 0;
+            size_t history_rows = 0;
+            if (!result.live.bookmarks.empty()) {
+              bookmarks = result.live.bookmarks.size();
+              writer->AddBookmarks(result.live.bookmarks,
+                                   u"Imported from Chrome");
             }
-            if (!data.history.empty()) {
-              writer->AddHistoryPage(data.history,
+            if (!result.live.history.empty()) {
+              history_rows = result.live.history.size();
+              writer->AddHistoryPage(result.live.history,
                                      history::VisitSource::SOURCE_BROWSED);
-              imported += data.history.size();
             }
-            self->ReportStatus("Imported from Chrome: " +
-                               base::NumberToString(imported) +
-                               " entries (bookmarks + history). Done.");
+            // Fold the live-merge outcome into the staged report so the page
+            // renders a single item list.
+            base::DictValue* items = result.report.FindDict("items");
+            if (items) {
+              base::DictValue bm;
+              bm.Set("status", bookmarks ? "ok" : "missing");
+              bm.Set("detail", base::NumberToString(bookmarks) + " imported");
+              items->Set("bookmarks", std::move(bm));
+              base::DictValue hi;
+              hi.Set("status", history_rows ? "ok" : "missing");
+              hi.Set("detail", base::NumberToString(history_rows) + " imported");
+              items->Set("history", std::move(hi));
+            }
+            std::string json;
+            base::JSONWriter::Write(base::Value(std::move(result.report)),
+                                    &json);
+            self->web_ui()->CallJavascriptFunctionUnsafe(
+                "prismWelcome.onImportReport", base::ValueView(std::move(json)));
           },
           weak_factory_.GetWeakPtr(), profile));
 }

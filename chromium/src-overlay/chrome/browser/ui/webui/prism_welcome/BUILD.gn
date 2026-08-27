@@ -15,6 +15,8 @@ source_set("prism_welcome") {
   deps = [
     "//chrome/browser:browser_public_dependencies",
     "//chrome/browser/importer",
+    "//chrome/browser/lifetime",
+    "//chrome/browser/prism:delegate_headers",
     "//components/history/core/browser",
     "//components/user_data_importer/common",
     "//sql",

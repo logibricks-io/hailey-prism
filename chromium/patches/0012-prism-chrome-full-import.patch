@@ -1,0 +1,64 @@
+Subject: [PATCH 0012] Prism: full Chrome profile import (Phase 6)
+
+chrome://prism-welcome's "Import from Chrome" now inherits Chrome's login
+state instead of only bookmarks/history:
+- chrome/browser/prism/prism_chrome_importer.{h,mm} (src-overlay): copies the
+  "Chrome Safe Storage" keychain seed into "Prism Safe Storage" (one
+  interactive ACL prompt — user-present by design) and stages Cookies /
+  Login Data / Preferences / Secure Preferences / Extensions into
+  <user-data-dir>/PrismChromeImport.staging/. SQLite payloads are copied
+  with their WAL sidecars and integrity-checked on the staged copy, so a
+  running Chrome is safe. Chrome's own directory is read-only throughout.
+- chrome_browser_main.cc: ApplyStagedChromeImport() runs from
+  PreMainMessageLoopRunImpl, moving the staged files into the Default
+  profile before any service opens them (an in-place copy would be
+  clobbered on shutdown). OSCrypt then derives its key from the migrated
+  seed (same PBKDF2 chain as Chrome's, patch 0004), so the copied v10
+  ciphertexts decrypt transparently.
+- ui/BUILD.gn: compile the importer (mac-only, like the rest of the Prism
+  chrome layer). Inserted past patch 0011's hunk context so the series
+  stays individually reverse-applicable.
+
+Test hooks (used by the fixture test, documented in
+docs/chrome-import.md): --prism-chrome-profile-dir,
+--prism-import-keychain-read-from, --prism-import-keychain-write-to.
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+index 77838aad7c..2f3987e17a 100644
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -1429,6 +1429,9 @@ static_library("ui") {
+       "browser_content_setting_bubble_model_delegate.cc",
+       "browser_content_setting_bubble_model_delegate.h",
+       "browser_live_tab_context.cc",
++      # Prism: full Chrome profile import (Phase 6, mac-only).
++      "//chrome/browser/prism/prism_chrome_importer.h",
++      "//chrome/browser/prism/prism_chrome_importer.mm",
+       "browser_live_tab_context.h",
+       "browser_manager_service.cc",
+       "browser_manager_service.h",
+diff --git a/chrome/browser/chrome_browser_main.cc b/chrome/browser/chrome_browser_main.cc
+index 90b90122fd..ae1e4bb5af 100644
+--- a/chrome/browser/chrome_browser_main.cc
++++ b/chrome/browser/chrome_browser_main.cc
+@@ -62,6 +62,7 @@
+ #if BUILDFLAG(ENABLE_DOWNGRADE_PROCESSING)
+ #include "chrome/browser/downgrade/downgrade_manager_delegate_impl.h"  // nogncheck
+ #endif
++#include "chrome/browser/prism/prism_chrome_importer.h"
+ #include "chrome/browser/profiles/profile_manager.h"
+ #include "chrome/browser/profiles/profile_manager_observer.h"
+ #include "chrome/browser/profiles/profiles_state.h"
+@@ -1712,6 +1713,13 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
+ 
+   SCOPED_UMA_HISTOGRAM_LONG_TIMER("Startup.PreMainMessageLoopRunImplLongTime");
+ 
++#if BUILDFLAG(IS_MAC)
++  // Prism: land a staged Chrome data import (from chrome://prism-welcome)
++  // before the profile opens those files — an in-place copy would be
++  // clobbered by the running browser on shutdown. No-op unless staged.
++  prism::ApplyStagedChromeImport(user_data_dir());
++#endif
++
+ #if BUILDFLAG(IS_WIN)
+   // Windows parental controls calls can be slow, so we do an early init here
+   // that calculates this value off of the UI thread.

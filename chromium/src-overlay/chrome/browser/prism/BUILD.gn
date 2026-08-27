@@ -5,11 +5,13 @@
 # constants without dragging the ui-heavy implementation in.
 source_set("delegate_headers") {
   sources = [
+    "prism_chrome_importer.h",
     "prism_space_window_delegate.h",
     "prism_spaces_ui_constants.h",
   ]
 
   public_deps = [
+    "//base",
     "//prism:prism",
   ]
 }
