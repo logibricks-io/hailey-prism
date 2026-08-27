@@ -87,8 +87,25 @@ SpaceManager::Result SpaceManager::TakeOver(int id) {
   return Result{Error::kNone, it->second};
 }
 
+SpaceManager::Result SpaceManager::StopAgent(int id) {
+  auto it = spaces_.find(id);
+  if (it == spaces_.end()) {
+    return Result{Error::kNotFound, std::nullopt};
+  }
+  if (it->second.ownership != Ownership::kUser) {
+    it->second.ownership = Ownership::kUser;
+  }
+  return Result{Error::kNone, it->second};
+}
+
 SpaceManager::Error SpaceManager::Close(int id) {
-  return spaces_.erase(id) > 0 ? Error::kNone : Error::kNotFound;
+  if (spaces_.erase(id) == 0) {
+    return Error::kNotFound;
+  }
+  if (focused_space_id_ == id) {
+    focused_space_id_ = 0;
+  }
+  return Error::kNone;
 }
 
 const SpaceManager::Space* SpaceManager::Find(int id) const {

@@ -305,17 +305,18 @@ async function runPhase4Suite(cdp, profileDir) {
   const pageTab = (await cdp.send("Prism.createTab", { url: "chrome://prism-spaces" })).targetId;
   const pageSession = (await cdp.send("Target.attachToTarget", { targetId: pageTab, flatten: true })).sessionId;
   await new Promise((resolve) => setTimeout(resolve, 1200));
-  // The page renders into #list (WebUI renderers cannot fetch chrome://
-  // subresources, so data flows via chrome.send + CallJavascriptFunction).
+  // The page renders the card wall into #wall (WebUI renderers cannot fetch
+  // chrome:// subresources, so data flows via chrome.send +
+  // CallJavascriptFunction).
   const readText = () => cdp.send("Runtime.evaluate", {
-    expression: "document.getElementById('list')?.innerText ?? ''",
+    expression: "document.getElementById('wall')?.innerText ?? ''",
     returnByValue: true,
   }, pageSession).then((r) => r.result?.value ?? "");
 
   let text = await readText();
   check("phase4: management page lists both spaces with ownership",
     text.includes("phase4-space") && text.includes("phase4-other") &&
-      text.includes("window open"),
+      text.includes("Window open"),
     text.split("\n").slice(0, 3).join(" / "));
 
   await cdp.send("Prism.setAgentTaskState", { label: "running the phase-4 probe" });
@@ -403,6 +404,99 @@ async function runPhase4Suite(cdp, profileDir) {
   await cdp.send("Prism.closeTaskSpace");  // phase4-space (windowed tabs stay)
 }
 
+// Phase 5 suite: the Mission-Control-style overview (chrome://prism-spaces
+// card wall), on-demand tab thumbnails, focus switching from a card, and the
+// create / delete-all actions. The banner and ⌥S cycling are native UI and
+// are verified manually; their SpaceManager effects are unit-tested.
+async function runPhase5Suite(cdp) {
+  const spaceA = (await cdp.send("Prism.createTaskSpace", { name: "phase5-alpha" })).taskSpace;
+  await cdp.send("Prism.useTaskSpace", { id: spaceA.id });
+  await cdp.send("Prism.createTab", { url: "https://example.com" });
+  const spaceB = (await cdp.send("Prism.createTaskSpace", { name: "phase5-beta" })).taskSpace;
+  await cdp.send("Prism.useTaskSpace", { id: spaceB.id });
+  await cdp.send("Prism.createTab", { url: "about:blank" });
+  await cdp.send("Prism.showTaskSpace", { id: spaceA.id });
+
+  // The overview lives outside any space (it manages them): open it as a
+  // plain browser-level target in the main window.
+  const overview = (await cdp.send("Target.createTarget", { url: "chrome://prism-spaces" })).targetId;
+  const session = (await cdp.send("Target.attachToTarget", { targetId: overview, flatten: true })).sessionId;
+  const evalIn = (expression) =>
+    cdp.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }, session)
+      .then((r) => r.result?.value);
+  const pollUntil = async (fn, timeoutMs = 8000) => {
+    const deadline = Date.now() + timeoutMs;
+    let value;
+    while (Date.now() < deadline) {
+      value = await fn();
+      if (value) return value;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    return value;
+  };
+
+  // Two space cards + the "+ New space" card.
+  const rendered = await pollUntil(async () =>
+    (await evalIn("document.querySelectorAll('#wall .card').length")) >= 3);
+  check("phase5: overview renders one card per space plus the create card",
+    !!rendered, `cards=${await evalIn("document.querySelectorAll('#wall .card').length")}`);
+  const names = await evalIn(
+    "Array.from(document.querySelectorAll('#wall .card .name')).map((n) => n.textContent).join(',')");
+  check("phase5: cards carry the space names",
+    names.includes("phase5-alpha") && names.includes("phase5-beta"), names);
+  const countText = await evalIn("document.getElementById('count').textContent");
+  check("phase5: header shows the space count", countText.trim() === "2 spaces", countText);
+
+  // Thumbnails: the card <img> for alpha's space loads a real capture of its
+  // example.com tab (the 1x1 transparent fallback has naturalWidth 1). fetch()
+  // is not an option here — the WebUI CSP grants img-src but not connect-src.
+  const thumb = await pollUntil(async () => {
+    const state = await evalIn(`(() => {
+      const img = document.querySelector('.card[data-space="${spaceA.id}"] .thumb img');
+      return img && img.complete ? { w: img.naturalWidth, h: img.naturalHeight } : null;
+    })()`);
+    return state && state.w > 0 ? state : null;
+  });
+  check("phase5: thumbnail is a real capture, not the 1x1 fallback",
+    thumb && thumb.w >= 300 && thumb.h >= 180, JSON.stringify(thumb));
+
+  // Focus from a card: the manager records it and the wall highlights it.
+  await evalIn(`chrome.send('spaceAction', [${spaceB.id}, 'focus'])`);
+  const focusedName = await pollUntil(async () => {
+    const name = await evalIn(
+      "(document.querySelector('#wall .card.focused .name') || {}).textContent || ''");
+    return name === "phase5-beta" ? name : null;
+  });
+  check("phase5: card focus switches SpaceManager focus + highlight",
+    focusedName === "phase5-beta", String(focusedName));
+
+  // "+ New space" creates a user-owned space.
+  await evalIn("chrome.send('spaceAction', [0, 'create'])");
+  const userSpace = await pollUntil(async () => {
+    const spaces = (await cdp.send("Prism.listTaskSpaces")).taskSpaces;
+    return spaces.find((s) => s.createdBy === "user") ?? null;
+  });
+  check("phase5: create action adds a user-owned space", !!userSpace, JSON.stringify(userSpace));
+  const cardsAfterCreate = await pollUntil(async () =>
+    (await evalIn("document.querySelectorAll('#wall .card').length")) >= 4);
+  check("phase5: the wall shows the new space card", !!cardsAfterCreate);
+
+  // "Delete all" clears every space (and its tabs) — the wall keeps just
+  // the create card.
+  await evalIn("chrome.send('spaceAction', [0, 'deleteAll'])");
+  const emptied = await pollUntil(async () =>
+    (await cdp.send("Prism.listTaskSpaces")).taskSpaces.length === 0);
+  check("phase5: delete-all closes every space", !!emptied);
+  const cardsAfterDelete = await pollUntil(async () =>
+    (await evalIn("document.querySelectorAll('#wall .card').length")) === 1);
+  check("phase5: the wall falls back to just the create card", !!cardsAfterDelete,
+    `cards=${await evalIn("document.querySelectorAll('#wall .card').length")}`);
+
+  try {
+    await cdp.send("Target.closeTarget", { targetId: overview });
+  } catch { /* best-effort cleanup */ }
+}
+
 async function runPipeSuite(profileDir, fixture) {
   const child = spawnBrowser({ browserPath, profileDir });
   const transport = new PipeTransport({
@@ -414,6 +508,7 @@ async function runPipeSuite(profileDir, fixture) {
     await runSuite(cdp, "pipe");
     await runSnapshotSuite(cdp, fixture.originA, fixture.originB);
     await runPhase4Suite(cdp, profileDir);
+    await runPhase5Suite(cdp);
   } catch (error) {
     check("pipe: unexpected transport failure", false, error.message);
   } finally {

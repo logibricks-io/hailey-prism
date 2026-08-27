@@ -12,6 +12,10 @@ source importer on macOS; passwords/cookies/extensions stay behind Chrome's
 keychain ACL and are explicitly not touched) and from Safari/Firefox (stock
 framework). Skipping is side-effect free.
 
+(Regenerated 2026-08-27: the chrome_web_ui_configs.cc tail hunk was re-based
+onto the post-0008 tree state so the series applies cleanly from a pristine
+checkout; the landed content is unchanged.)
+
 diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
 index a26f9a25f1..90952d43b6 100644
 --- a/chrome/browser/ui/BUILD.gn
@@ -34,10 +38,10 @@ index 0d4b026323..03b8f98e10 100644
      "//ui/webui:buildflags",
 +    "//chrome/browser/ui/webui/prism_welcome",
    ]
- 
+
    if (is_win || is_chromeos) {
 diff --git a/chrome/browser/ui/webui/chrome_web_ui_configs.cc b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
-index f1109b83bf..3d05b03045 100644
+index f845aa84a2..3d05b03045 100644
 --- a/chrome/browser/ui/webui/chrome_web_ui_configs.cc
 +++ b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
 @@ -242,6 +242,7 @@
@@ -47,14 +51,14 @@ index f1109b83bf..3d05b03045 100644
 +#include "chrome/browser/ui/webui/prism_welcome/prism_welcome_ui.h"
  #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
          // BUILDFLAG(IS_CHROMEOS)
- 
-@@ -510,5 +511,7 @@ void RegisterChromeWebUIConfigs() {
+
+@@ -510,4 +511,7 @@ void RegisterChromeWebUIConfigs() {
    map.AddWebUIConfig(std::make_unique<skills::SkillsUIConfig>());
  #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
          // BUILDFLAG(IS_CHROMEOS)
 +  // Prism: chrome://prism-welcome first-run onboarding (Phase 5).
 +  map.AddWebUIConfig(std::make_unique<prism::PrismWelcomeUIConfig>());
- 
++
  }
 diff --git a/chrome/browser/chrome_browser_main.cc b/chrome/browser/chrome_browser_main.cc
 index a32949ed04..90b90122fd 100644

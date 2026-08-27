@@ -1,0 +1,112 @@
+Subject: [PATCH 0010] Prism: Spaces overview + next-space commands (mac)
+
+Adds the user-facing entry points for task spaces:
+- chrome_command_ids.h: IDC_PRISM_SPACES_OVERVIEW / IDC_PRISM_CYCLE_SPACE
+- browser_command_controller.cc: both commands registered in
+  InitCommandState and dispatched to the PrismSpaceWindowDelegate
+  (OpenSpacesOverview opens chrome://prism-spaces in a tab;
+  CycleToNextSpace walks [default browsing area] + spaces by id and
+  raises the matching window)
+- main_menu_builder.mm: "Spaces Overview" / "Show Next Space" items in
+  the View menu (hidden for PWA windows)
+- accelerators_cocoa.mm: Cmd+Shift+S and Option+S key equivalents
+- generated_resources.grd: the two menu titles
+diff --git a/chrome/app/chrome_command_ids.h b/chrome/app/chrome_command_ids.h
+index 3bdb2131ef..50625a5439 100644
+--- a/chrome/app/chrome_command_ids.h
++++ b/chrome/app/chrome_command_ids.h
+@@ -127,6 +127,10 @@
+ #define IDC_ADD_NEW_TAB_RECENT_GROUP  34107
+ #define IDC_UNFOCUS_TAB_GROUP         34108
+ 
++// Prism commands
++#define IDC_PRISM_SPACES_OVERVIEW       34120
++#define IDC_PRISM_CYCLE_SPACE           34121
++
+ // Page-related commands
+ #define IDC_BOOKMARK_THIS_TAB           35000
+ #define IDC_BOOKMARK_ALL_TABS           35001
+diff --git a/chrome/app/generated_resources.grd b/chrome/app/generated_resources.grd
+index 5c0d36402d..021f07cc88 100644
+--- a/chrome/app/generated_resources.grd
++++ b/chrome/app/generated_resources.grd
+@@ -10325,6 +10325,14 @@ Keep your key file in a safe place. You will need it to create new versions of y
+                Bottom
+       </message>
+ 
++      <!-- Prism Spaces Strings -->
++      <message name="IDS_PRISM_SPACES_OVERVIEW_MAC" desc="In Title Case: The View menu item that opens the Prism spaces overview page (chrome://prism-spaces).">
++        Spaces Overview
++      </message>
++      <message name="IDS_PRISM_NEXT_SPACE_MAC" desc="In Title Case: The View menu item that switches focus to the next Prism space.">
++        Show Next Space
++      </message>
++
+       <!-- Vertical Tab Strings -->
+       <if expr="use_titlecase">
+         <then>
+diff --git a/chrome/browser/ui/browser_command_controller.cc b/chrome/browser/ui/browser_command_controller.cc
+index a457075948..8ac2938f8a 100644
+--- a/chrome/browser/ui/browser_command_controller.cc
++++ b/chrome/browser/ui/browser_command_controller.cc
+@@ -41,6 +41,7 @@
+ #include "chrome/browser/glic/public/service/glic_instance_coordinator.h"
+ #include "chrome/browser/lifetime/application_lifetime.h"
+ #include "chrome/browser/prefs/incognito_mode_prefs.h"
++#include "chrome/browser/prism/prism_space_window_delegate.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/profiles/profile_window.h"
+ #include "chrome/browser/sessions/tab_restore_service_factory.h"
+@@ -802,6 +803,12 @@ void BrowserCommandController::HandleCommandWithDisposition(
+     case IDC_NAME_WINDOW:
+       PromptToNameWindow(browser_);
+       break;
++    case IDC_PRISM_SPACES_OVERVIEW:
++      prism::GetPrismSpaceWindowDelegate()->OpenSpacesOverview(browser_);
++      break;
++    case IDC_PRISM_CYCLE_SPACE:
++      prism::GetPrismSpaceWindowDelegate()->CycleToNextSpace();
++      break;
+ 
+ #if BUILDFLAG(IS_CHROMEOS)
+     case IDC_TAKE_SCREENSHOT:
+@@ -1714,6 +1721,8 @@ void BrowserCommandController::InitCommandState() {
+   UpdateTabRestoreCommandState();
+   command_updater_->UpdateCommandEnabled(IDC_EXIT, true);
+   command_updater_->UpdateCommandEnabled(IDC_NAME_WINDOW, true);
++  command_updater_->UpdateCommandEnabled(IDC_PRISM_SPACES_OVERVIEW, true);
++  command_updater_->UpdateCommandEnabled(IDC_PRISM_CYCLE_SPACE, true);
+   command_updater_->UpdateCommandEnabled(IDC_TOGGLE_VERTICAL_TABS, true);
+   command_updater_->UpdateCommandEnabled(IDC_VERTICAL_TABS_SEND_FEEDBACK, true);
+   command_updater_->UpdateCommandEnabled(
+diff --git a/chrome/browser/ui/cocoa/accelerators_cocoa.mm b/chrome/browser/ui/cocoa/accelerators_cocoa.mm
+index ac3e3353cc..6e3da3599f 100644
+--- a/chrome/browser/ui/cocoa/accelerators_cocoa.mm
++++ b/chrome/browser/ui/cocoa/accelerators_cocoa.mm
+@@ -118,6 +118,9 @@
+      ui::VKEY_P},
+     {IDC_TOGGLE_VERTICAL_TABS_COLLAPSE, ui::EF_COMMAND_DOWN | ui::EF_SHIFT_DOWN,
+      ui::VKEY_L},
++    {IDC_PRISM_SPACES_OVERVIEW, ui::EF_COMMAND_DOWN | ui::EF_SHIFT_DOWN,
++     ui::VKEY_S},
++    {IDC_PRISM_CYCLE_SPACE, ui::EF_ALT_DOWN, ui::VKEY_S},
+ };
+ 
+ ui::Accelerator AcceleratorForCloseWindow() {
+diff --git a/chrome/browser/ui/cocoa/main_menu_builder.mm b/chrome/browser/ui/cocoa/main_menu_builder.mm
+index bb808ed76d..ab31966c02 100644
+--- a/chrome/browser/ui/cocoa/main_menu_builder.mm
++++ b/chrome/browser/ui/cocoa/main_menu_builder.mm
+@@ -315,6 +315,12 @@ + (instancetype)imageWithPrivateSystemSymbolName:(NSString*)name
+                   .command_id(IDC_TOGGLE_VERTICAL_TABS_COLLAPSE)
+                   .key_equivalent(@"L", NSEventModifierFlagCommand)
+                   .remove_if(!tabs::IsVerticalTabsFeatureEnabled()),
++              Item(IDS_PRISM_SPACES_OVERVIEW_MAC)
++                  .command_id(IDC_PRISM_SPACES_OVERVIEW)
++                  .remove_if(is_pwa),
++              Item(IDS_PRISM_NEXT_SPACE_MAC)
++                  .command_id(IDC_PRISM_CYCLE_SPACE)
++                  .remove_if(is_pwa),
+               Item(IDS_CUSTOMIZE_TOUCH_BAR)
+                   .tag(IDC_CUSTOMIZE_TOUCH_BAR)
+                   .action(@selector(toggleTouchBarCustomizationPalette:))

@@ -3,12 +3,18 @@
 
 #include "chrome/browser/prism/prism_space_window_delegate.h"
 
+#include <algorithm>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "base/functional/bind.h"
 #include "base/no_destructor.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/task/sequenced_task_runner.h"
+#include "build/build_config.h"
+#include "chrome/browser/infobars/confirm_infobar_creator.h"
+#include "chrome/browser/prism/prism_dock_badge.h"
 #include "chrome/browser/prism/prism_spaces_ui_constants.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -16,6 +22,10 @@
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "components/infobars/content/content_infobar_manager.h"
+#include "components/infobars/core/confirm_infobar_delegate.h"
+#include "components/infobars/core/infobar.h"
+#include "components/infobars/core/infobar_manager.h"
 #include "content/public/browser/web_contents.h"
 #include "prism/browser/spaces/space_manager.h"
 #include "cc/paint/paint_flags.h"
@@ -48,9 +58,72 @@ class ClickRingView : public views::View {
   }
 };
 
+// The "Agent is in control" banner shown on a space window's active tab
+// while SpaceManager says the space is agent-owned. OK = hand off to the
+// user (kAgentDelegatedToUser); Cancel = stop the agent for good (kUser —
+// the agent can only re-enter by claiming the space anew).
+class AgentBannerDelegate : public ConfirmInfoBarDelegate {
+ public:
+  AgentBannerDelegate(int space_id,
+                      std::string space_name,
+                      base::RepeatingCallback<void(int)> on_dismissed)
+      : space_id_(space_id),
+        space_name_(std::move(space_name)),
+        on_dismissed_(std::move(on_dismissed)) {}
+
+  // ConfirmInfoBarDelegate:
+  InfoBarIdentifier GetIdentifier() const override {
+    return PRISM_AGENT_BANNER_INFOBAR_DELEGATE;
+  }
+  std::u16string GetMessageText() const override {
+    return base::UTF8ToUTF16(space_name_ + " \xc2\xb7 Agent is in control");
+  }
+  int GetButtons() const override { return BUTTON_OK | BUTTON_CANCEL; }
+  std::u16string GetButtonLabel(InfoBarButton button) const override {
+    return button == BUTTON_OK ? u"Take over" : u"Stop agent";
+  }
+  bool Accept() override {
+    SpaceManager::GetInstance()->HandOff(space_id_);
+    return true;
+  }
+  bool Cancel() override {
+    SpaceManager::GetInstance()->StopAgent(space_id_);
+    return true;
+  }
+  void InfoBarDismissed() override { on_dismissed_.Run(space_id_); }
+
+ private:
+  const int space_id_;
+  const std::string space_name_;
+  base::RepeatingCallback<void(int)> on_dismissed_;
+};
+
+// True while `wc` is still hosted in some browser window's tab strip — the
+// liveness check used before dereferencing tracked banner pointers.
+bool WebContentsHostedAnywhere(content::WebContents* wc) {
+  bool hosted = false;
+  GlobalBrowserCollection::GetInstance()->ForEach(
+      [&](BrowserWindowInterface* candidate) {
+        auto* tabs = candidate->GetTabStripModel();
+        for (int i = 0; i < tabs->count(); ++i) {
+          if (tabs->GetWebContentsAt(i) == wc) {
+            hosted = true;
+            return false;
+          }
+        }
+        return true;
+      });
+  return hosted;
+}
+
 }  // namespace
 
-PrismSpaceWindowDelegate::PrismSpaceWindowDelegate() = default;
+PrismSpaceWindowDelegate::PrismSpaceWindowDelegate() {
+  agent_surface_timer_.Start(
+      FROM_HERE, base::Seconds(1),
+      base::BindRepeating(&PrismSpaceWindowDelegate::SyncAgentSurfaces,
+                          base::Unretained(this)));
+}
 PrismSpaceWindowDelegate::~PrismSpaceWindowDelegate() = default;
 
 BrowserWindowInterface* PrismSpaceWindowDelegate::FindSpaceWindow(
@@ -126,6 +199,63 @@ bool PrismSpaceWindowDelegate::AppendTabToSpaceWindow(
   return true;
 }
 
+void PrismSpaceWindowDelegate::OpenSpacesOverview(Browser* browser) {
+  if (!browser) {
+    return;
+  }
+  content::OpenURLParams params(GURL(kPrismSpacesURL), content::Referrer(),
+                                WindowOpenDisposition::NEW_FOREGROUND_TAB,
+                                ui::PAGE_TRANSITION_AUTO_BOOKMARK, false);
+  browser->OpenURL(params, /*navigation_handle_callback=*/{});
+}
+
+void PrismSpaceWindowDelegate::CycleToNextSpace() {
+  auto* manager = SpaceManager::GetInstance();
+  std::vector<int> order;
+  order.push_back(0);  // the implicit default space: main browsing area
+  for (const auto& space : manager->List()) {
+    order.push_back(space.id);  // List() is id-ordered (std::map backed)
+  }
+
+  const int current = manager->focused_space_id();
+  const auto it = std::find(order.begin(), order.end(), current);
+  const size_t index =
+      it == order.end() ? 0 : static_cast<size_t>(it - order.begin());
+  const int next = order[(index + 1) % order.size()];
+  manager->set_focused_space_id(next);
+
+  if (next != 0) {
+    if (BrowserWindowInterface* window = FindSpaceWindow(next)) {
+      window->GetWindow()->Show();
+      window->GetWindow()->Activate();
+    } else {
+      // No live window yet: open one hosting just the identity tab. Agent
+      // tabs stay windowless until the agent drives showTaskSpace — the
+      // chrome layer cannot reach them (per-session handler state).
+      ShowTaskSpace(next, {});
+      manager->SetWindowShown(next, true);
+    }
+    return;
+  }
+
+  // Back to the default space: raise the first window hosting no space.
+  BrowserWindowInterface* target = nullptr;
+  GlobalBrowserCollection::GetInstance()->ForEach(
+      [&](BrowserWindowInterface* candidate) {
+        for (const auto& [space_id, window] : windows_) {
+          if (window == candidate) {
+            return true;  // a space window; keep looking
+          }
+        }
+        target = candidate;
+        return false;
+      });
+  if (target) {
+    target->GetWindow()->Show();
+    target->GetWindow()->Activate();
+  }
+}
+
 void PrismSpaceWindowDelegate::AnimateClickHighlight(int space_id,
                                                      int x,
                                                      int y) {
@@ -161,6 +291,89 @@ void PrismSpaceWindowDelegate::AnimateClickHighlight(int space_id,
         }
       }, widget->GetWeakPtr()),
       base::Milliseconds(450));
+}
+
+void PrismSpaceWindowDelegate::SyncAgentSurfaces() {
+  auto* manager = SpaceManager::GetInstance();
+
+  int agent_controlled = 0;
+  for (const auto& space : manager->List()) {
+    if (space.ownership == SpaceManager::Ownership::kAgent) {
+      ++agent_controlled;
+    }
+  }
+#if BUILDFLAG(IS_MAC)
+  SetDockBadgeCount(agent_controlled);
+#endif
+
+  // Snapshot the ids: FindSpaceWindow can prune entries from windows_.
+  std::vector<int> ids;
+  ids.reserve(windows_.size());
+  for (const auto& [id, window] : windows_) {
+    ids.push_back(id);
+  }
+
+  for (const int id : ids) {
+    BrowserWindowInterface* window = FindSpaceWindow(id);
+    const auto* space = manager->Find(id);
+    const bool agent_in_control =
+        space && space->ownership == SpaceManager::Ownership::kAgent;
+    if (!agent_in_control) {
+      dismissed_banners_.erase(id);  // re-arm for the next agent stint
+    }
+    content::WebContents* active =
+        window ? window->GetTabStripModel()->GetActiveWebContents() : nullptr;
+
+    // Reconcile the tracked banner with reality (it can die with its tab or
+    // by user action between ticks).
+    auto tracked = banners_.find(id);
+    if (tracked != banners_.end()) {
+      content::WebContents* tracked_wc = tracked->second.web_contents;
+      bool alive = false;
+      if (tracked_wc && WebContentsHostedAnywhere(tracked_wc)) {
+        const auto& bars =
+            infobars::ContentInfoBarManager::FromWebContents(tracked_wc)
+                ->infobars();
+        alive = std::find(bars.begin(), bars.end(), tracked->second.infobar) !=
+                bars.end();
+      }
+      if (!alive) {
+        banners_.erase(tracked);
+        tracked = banners_.end();
+      }
+    }
+
+    if (agent_in_control && active && !dismissed_banners_.count(id) &&
+        (tracked == banners_.end() || tracked->second.web_contents != active)) {
+      if (tracked != banners_.end()) {
+        // The active tab changed under the banner: retire the old one.
+        auto* old_manager = infobars::ContentInfoBarManager::FromWebContents(
+            tracked->second.web_contents);
+        old_manager->RemoveInfoBar(tracked->second.infobar);
+        banners_.erase(tracked);
+      }
+      auto* infobar_manager =
+          infobars::ContentInfoBarManager::FromWebContents(active);
+      infobars::InfoBar* added = infobar_manager->AddInfoBar(
+          CreateConfirmInfoBar(std::make_unique<AgentBannerDelegate>(
+              id, space->name,
+              base::BindRepeating(
+                  &PrismSpaceWindowDelegate::OnBannerDismissed,
+                  base::Unretained(this)))));
+      banners_[id] = {active, added};
+    } else if (!agent_in_control && tracked != banners_.end()) {
+      infobars::ContentInfoBarManager::FromWebContents(
+          tracked->second.web_contents)
+          ->RemoveInfoBar(tracked->second.infobar);
+      banners_.erase(tracked);
+    }
+  }
+}
+
+void PrismSpaceWindowDelegate::OnBannerDismissed(int space_id) {
+  dismissed_banners_.insert(space_id);
+  // The manager is already tearing the bar down; just forget the pointers.
+  banners_.erase(space_id);
 }
 
 PrismSpaceWindowDelegate* GetPrismSpaceWindowDelegate() {

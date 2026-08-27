@@ -5,11 +5,22 @@
 #define CHROME_BROWSER_PRISM_PRISM_SPACE_WINDOW_DELEGATE_H_
 
 #include <map>
+#include <set>
 
 #include "base/memory/raw_ptr.h"
+#include "base/timer/timer.h"
 #include "prism/browser/spaces/space_window_delegate.h"
 
+class Browser;
 class BrowserWindowInterface;
+
+namespace content {
+class WebContents;
+}
+
+namespace infobars {
+class InfoBar;
+}
 
 namespace prism {
 
@@ -18,7 +29,9 @@ namespace prism {
 // agent tabs in it, pins chrome://prism-spaces as the window's identity tab,
 // and paints the agent click-highlight overlay.
 //
-// Self-registers at dylib load (static initializer) — see the .cc.
+// Phase 5 adds the user-facing surfaces: the ⌥S/View-menu space switching
+// entry points, an "Agent is in control" infobar on space windows, and the
+// Dock badge counting agent-controlled spaces.
 class PrismSpaceWindowDelegate : public SpaceWindowDelegate {
  public:
   PrismSpaceWindowDelegate();
@@ -34,11 +47,35 @@ class PrismSpaceWindowDelegate : public SpaceWindowDelegate {
                               std::unique_ptr<content::WebContents> tab)
       override;
 
+  // Phase 5: user-facing space switching (View menu items / keyboard).
+  // Opens chrome://prism-spaces in a new foreground tab of `browser`.
+  void OpenSpacesOverview(Browser* browser);
+  // Cycles focus through [the implicit default space = the user's main
+  // browsing area] + the spaces by id, raising the matching window. The
+  // default space maps to the first window that hosts no space.
+  void CycleToNextSpace();
+
  private:
   // Validated lookup: the tracked window, or nullptr when it was closed.
   BrowserWindowInterface* FindSpaceWindow(int space_id);
 
+  // 1s poll reconciling the agent-in-control banner on every space window
+  // and the Dock badge with the SpaceManager ownership state (handoffs can
+  // arrive over CDP without the chrome layer noticing).
+  void SyncAgentSurfaces();
+  void OnBannerDismissed(int space_id);
+
+  struct TrackedBanner {
+    raw_ptr<content::WebContents> web_contents;
+    raw_ptr<infobars::InfoBar> infobar;
+  };
+
   std::map<int, raw_ptr<BrowserWindowInterface>> windows_;
+  std::map<int, TrackedBanner> banners_;
+  // Spaces whose banner the user closed with the X; suppressed until the
+  // ownership leaves kAgent (then re-enters).
+  std::set<int> dismissed_banners_;
+  base::RepeatingTimer agent_surface_timer_;
 };
 
 // Process-wide accessor. The delegate is registered into the prism

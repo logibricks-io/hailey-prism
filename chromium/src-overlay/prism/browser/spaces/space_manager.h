@@ -92,6 +92,11 @@ class SpaceManager {
   // No ownership check (contract §2.3).
   Result TakeOver(int id);
 
+  // Stops the agent for good: any agent-held ownership becomes kUser, so
+  // agents can neither drive nor select the space until they Claim it anew
+  // (the PRISM_TASK_SPACE_INACTIVE family semantics).
+  Result StopAgent(int id);
+
   // Closes (destroys) a space. Returns kNotFound when absent.
   Error Close(int id);
 
@@ -118,9 +123,17 @@ class SpaceManager {
   // Marks whether a visible window hosts the space.
   void SetWindowShown(int space_id, bool shown);
 
+  // The space currently focused by user chrome (⌥S cycling, overview
+  // highlight). 0 = the implicit default space: the user's main browsing
+  // area, which has no Space record. Chrome-layer bookkeeping only; agents
+  // never observe it.
+  int focused_space_id() const { return focused_space_id_; }
+  void set_focused_space_id(int id) { focused_space_id_ = id; }
+
  private:
   std::map<int, Space> spaces_;
   int next_id_ = 1;
+  int focused_space_id_ = 0;
 };
 
 }  // namespace prism

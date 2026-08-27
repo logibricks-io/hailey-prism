@@ -3,17 +3,24 @@
 
 #include "chrome/browser/ui/webui/prism_spaces/prism_spaces_ui.h"
 
+#include <map>
 #include <string>
 #include <utility>
+#include <vector>
 
+#include "base/base64.h"
 #include "base/functional/bind.h"
+#include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/values.h"
+#include "base/no_destructor.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/timer/timer.h"
+#include "base/values.h"
 #include "chrome/browser/prism/prism_space_window_delegate.h"
 #include "chrome/browser/prism/prism_spaces_ui_constants.h"
 #include "content/public/browser/devtools_agent_host.h"
+#include "content/public/browser/devtools_agent_host_client.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
@@ -24,40 +31,72 @@ namespace prism {
 
 namespace {
 
-// The management page: plain HTML/JS (no framework, no grit — served from a
-// request filter to keep the patch surface minimal). Data comes from
-// chrome://prism-spaces/data.json; actions go through chrome.send.
+// The spaces overview: a Mission-Control-style card wall. Plain HTML/JS (no
+// framework, no grit — served from a request filter to keep the patch surface
+// minimal). Data comes from chrome.send("querySpaces") pushes; actions go
+// through chrome.send("spaceAction"); thumbnails are captured on demand from
+// the space's active tab and served from thumb/<id>.png.
 constexpr char kPageHtml[] = R"HTML(<!doctype html>
 <html><head><meta charset="utf-8"><title>Prism Spaces</title>
 <style>
   :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
   body { font-family: -apple-system, system-ui, sans-serif; background: #17141f;
-         color: #ece9f4; margin: 0; padding: 32px; }
-  h1 { font-size: 20px; font-weight: 600; }
+         color: #ece9f4; margin: 0; padding: 28px 32px; }
+  header { display: flex; align-items: baseline; gap: 14px; margin-bottom: 20px; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0; }
   h1 .mark { color: #b69cff; }
-  .space { background: #211c2e; border: 1px solid #352c4a; border-radius: 12px;
-           padding: 16px 20px; margin: 14px 0; }
-  .row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-  .name { font-size: 15px; font-weight: 600; }
-  .id, .ownership, .state, .window { color: #a79fbd; font-size: 12.5px; }
-  .ownership.agentDelegatedToUser { color: #ffb86b; }
-  .ownership.agent { color: #8fd3a5; }
-  .state::before { content: "\2014\2013 "; color: #b69cff; }
-  .tabs { margin: 10px 0 0 4px; color: #cfc8e3; font-size: 12.5px; }
-  .tabs div { padding: 2px 0; }
-  .tabs .active::before { content: "\25CF "; color: #b69cff; }
+  .count { color: #a79fbd; font-size: 13px; }
+  .hint { color: #6f6784; font-size: 12px; }
+  header .spacer { flex: 1; }
+  #wall { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+          gap: 18px; }
+  .card { background: #211c2e; border: 1px solid #352c4a; border-radius: 14px;
+          overflow: hidden; cursor: pointer; transition: border-color .15s,
+          transform .15s; }
+  .card:hover { border-color: #5b4a86; transform: translateY(-2px); }
+  .card.focused { border-color: #b69cff; box-shadow: 0 0 0 1px #b69cff; }
+  .thumb { position: relative; aspect-ratio: 16 / 10; background: #2a2340;
+           display: flex; align-items: center; justify-content: center; }
+  .thumb img { position: absolute; inset: 0; width: 100%; height: 100%;
+               object-fit: cover; object-position: top; }
+  .thumb .initial { font-size: 42px; font-weight: 700; color: #5b4a86; }
+  .meta { padding: 12px 14px 14px; }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .name { font-size: 14.5px; font-weight: 600; }
+  .chip { font-size: 11px; padding: 2px 8px; border-radius: 999px;
+          border: 1px solid #453a63; color: #a79fbd; }
+  .chip.agent { color: #8fd3a5; border-color: #2f5d43; }
+  .chip.agentDelegatedToUser { color: #ffb86b; border-color: #6b4a2a; }
+  .chip.focused { color: #b69cff; border-color: #b69cff; }
+  .chip.running { color: #8fd3a5; border-color: #2f5d43; }
+  .state { margin-top: 6px; color: #cfc8e3; font-size: 12.5px; min-height: 15px; }
+  .state:empty::before { content: "\2014"; color: #6f6784; }
   .actions { margin-top: 10px; display: flex; gap: 8px; }
   button { background: #322948; color: #ece9f4; border: 1px solid #453a63;
            border-radius: 8px; padding: 5px 12px; font-size: 12.5px;
            cursor: pointer; }
   button:hover { background: #3d3260; }
+  button.danger:hover { background: #5d2f3d; border-color: #7a3d4f; }
+  .newspace { display: flex; align-items: center; justify-content: center;
+              min-height: 220px; color: #a79fbd; font-size: 14px;
+              border: 1px dashed #453a63; background: transparent; }
+  .newspace:hover { color: #ece9f4; border-color: #b69cff; }
+  .newspace .plus { font-size: 30px; color: #b69cff; margin-right: 8px; }
   .empty { color: #a79fbd; }
 </style></head><body>
-<h1><span class="mark">Prism</span> Spaces</h1>
-<div id="list" class="empty">Loading…</div>
+<header>
+  <h1><span class="mark">Prism</span> Spaces</h1>
+  <span class="count" id="count"></span>
+  <span class="hint">&#x2325;S cycles spaces &middot; &#x21E7;&#x2318;S opens this wall</span>
+  <span class="spacer"></span>
+  <button id="deleteAll" class="danger">Delete all</button>
+</header>
+<div id="wall"><div class="empty">Loading&hellip;</div></div>
 <script src="app.js"></script></body></html>)HTML";
 
-constexpr char kAppJs[] = R"JS(function action(id, kind) {
+constexpr char kAppJs[] = R"JS(let refreshCounter = 0;
+function action(id, kind) {
   chrome.send("spaceAction", [id, kind]);
   setTimeout(refresh, 250);
 }
@@ -69,62 +108,259 @@ function span(parent, className, text) {
   parent.appendChild(el);
   return el;
 }
-function onData(spacesJson) {
-  const spaces = JSON.parse(spacesJson);
-  const list = document.getElementById("list");
-  list.replaceChildren();
-  if (!spaces.length) {
-    list.className = "empty";
-    list.textContent = "No task spaces yet. Agents create them via taskSpaces.new(...).";
-    return;
-  }
-  list.className = "";
+function ownershipLabel(space) {
+  if (space.ownership === "agent") return "Agent";
+  if (space.ownership === "agentDelegatedToUser") return "Delegated to you";
+  return "Yours";
+}
+function onData(payloadJson) {
+  const data = JSON.parse(payloadJson);
+  const spaces = data.spaces || [];
+  document.getElementById("count").textContent =
+      spaces.length ? spaces.length + " space" + (spaces.length > 1 ? "s" : "")
+                    : "";
+  const wall = document.getElementById("wall");
+  wall.replaceChildren();
   for (const space of spaces) {
-    const el = document.createElement("div");
-    el.className = "space";
+    const card = document.createElement("div");
+    card.className = "card" + (space.id === data.focused ? " focused" : "");
+    card.dataset.space = space.id;
+    card.addEventListener("click", () => action(space.id, "focus"));
+
+    const thumb = document.createElement("div");
+    thumb.className = "thumb";
+    const initial = document.createElement("div");
+    initial.className = "initial";
+    initial.textContent = (space.name || "?").trim().charAt(0).toUpperCase();
+    thumb.appendChild(initial);
+    if (space.hasTabs) {
+      const img = document.createElement("img");
+      img.src = "thumb/" + space.id + "." + refreshCounter + ".png";
+      img.alt = "";
+      thumb.appendChild(img);
+    }
+    card.appendChild(thumb);
+
+    const meta = document.createElement("div");
+    meta.className = "meta";
     const row = document.createElement("div");
     row.className = "row";
     span(row, "name", space.name);
-    span(row, "id", "#" + space.id);
-    span(row, "ownership " + space.ownership, space.ownership);
-    if (space.windowShown) span(row, "window", "\u25A0 window open");
-    if (space.agentTaskState) span(row, "state", space.agentTaskState);
-    el.appendChild(row);
-    if (space.tabs && space.tabs.length) {
-      const tabs = document.createElement("div");
-      tabs.className = "tabs";
-      for (const tab of space.tabs) {
-        const line = document.createElement("div");
-        if (tab.active) line.className = "active";
-        line.textContent = tab.title || tab.url || "(untitled)";
-        tabs.appendChild(line);
-      }
-      el.appendChild(tabs);
-    }
+    span(row, "chip " + space.ownership, ownershipLabel(space));
+    if (space.id === data.focused) span(row, "chip focused", "Focused");
+    if (space.windowShown) span(row, "chip", "Window open");
+    if (space.ownership === "agent" && space.agentTaskState)
+      span(row, "chip running", "Running");
+    meta.appendChild(row);
+    const state = document.createElement("div");
+    state.className = "state";
+    state.textContent = space.agentTaskState || "";
+    meta.appendChild(state);
+
     const actions = document.createElement("div");
     actions.className = "actions";
-    for (const [kind, label] of [["view", "View window"],
-                                 ["handoff", "Hand off to user"],
-                                 ["takeover", "Take over (agent)"],
-                                 ["close", "Close"]]) {
+    const specs = [["focus", "Focus"]];
+    if (space.ownership === "agent") specs.push(["handoff", "Hand off"]);
+    if (space.ownership === "agentDelegatedToUser")
+      specs.push(["takeover", "Return to agent"]);
+    specs.push(["close", "Close"]);
+    for (const [kind, label] of specs) {
       const btn = document.createElement("button");
       btn.textContent = label;
-      btn.addEventListener("click", () => action(space.id, kind));
+      if (kind === "close") btn.className = "danger";
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        action(space.id, kind);
+      });
       actions.appendChild(btn);
     }
-    el.appendChild(actions);
-    list.appendChild(el);
+    meta.appendChild(actions);
+    card.appendChild(meta);
+    wall.appendChild(card);
   }
+
+  const add = document.createElement("div");
+  add.className = "card newspace";
+  const plus = document.createElement("span");
+  plus.className = "plus";
+  plus.textContent = "+";
+  add.appendChild(plus);
+  add.appendChild(document.createTextNode(" New space"));
+  add.addEventListener("click", () => action(0, "create"));
+  wall.appendChild(add);
 }
+document.getElementById("deleteAll").addEventListener("click", () => {
+  action(0, "deleteAll");
+});
 function refresh() {
   chrome.send("querySpaces");
 }
 refresh();
-setInterval(refresh, 2000);)JS";
+setInterval(() => { refreshCounter++; refresh(); }, 2000);)JS";
+
+// 1x1 transparent PNG, served when a thumbnail cannot be captured (space
+// without tabs, closed target, capture failure). The card paints a styled
+// placeholder behind the image, so a transparent pixel reads as "empty".
+const uint8_t kFallbackPng[] = {
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+    0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+    0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00,
+    0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x62, 0x00, 0x01, 0x00, 0x00,
+    0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49,
+    0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82};
+
+struct ThumbCacheEntry {
+  std::string bytes;
+  base::TimeTicks at;
+};
+
+std::map<int, ThumbCacheEntry>& ThumbCache() {
+  static base::NoDestructor<std::map<int, ThumbCacheEntry>> cache;
+  return *cache;
+}
+
+void RespondPng(content::WebUIDataSource::GotDataCallback callback,
+                const std::string& png) {
+  std::vector<uint8_t> bytes(png.begin(), png.end());
+  std::move(callback).Run(
+      base::MakeRefCounted<base::RefCountedBytes>(std::move(bytes)));
+}
+
+// One-shot screenshot of a space tab via the internal DevTools protocol
+// (attach → Page.captureScreenshot → detach), after SnapshotJob's pattern.
+// Self-owned: deletes itself when the callback has run.
+class ThumbnailJob : public content::DevToolsAgentHostClient {
+ public:
+  ThumbnailJob(int space_id,
+               scoped_refptr<content::DevToolsAgentHost> host,
+               content::WebUIDataSource::GotDataCallback callback)
+      : space_id_(space_id),
+        host_(std::move(host)),
+        callback_(std::move(callback)) {}
+  ~ThumbnailJob() override = default;
+
+  void Run() {
+    watchdog_.Start(
+        FROM_HERE, base::Seconds(5),
+        base::BindOnce(&ThumbnailJob::Finish, base::Unretained(this),
+                       std::string()));
+    host_->AttachClient(this);
+    // 1280x800 is the fixed viewport of windowless tabs; scale 0.25 → 320px.
+    const std::string message =
+        R"({"id":1,"method":"Page.captureScreenshot","params":{"format":"png","clip":{"x":0,"y":0,"width":1280,"height":800,"scale":0.25}}})";
+    host_->DispatchProtocolMessage(this, base::as_byte_span(message));
+  }
+
+  // content::DevToolsAgentHostClient:
+  void DispatchProtocolMessage(content::DevToolsAgentHost* agent_host,
+                               base::span<const uint8_t> message) override {
+    std::string_view raw(reinterpret_cast<const char*>(message.data()),
+                         message.size());
+    auto parsed = base::JSONReader::Read(raw, base::JSON_PARSE_RFC);
+    if (!parsed || !parsed->is_dict() ||
+        parsed->GetDict().FindInt("id") != 1) {
+      return;  // protocol event or unrelated response
+    }
+    const std::string* data = parsed->GetDict().FindStringByDottedPath(
+        "result.data");
+    std::string png;
+    if (data) {
+      if (auto decoded = base::Base64Decode(*data)) {
+        png.assign(decoded->begin(), decoded->end());
+      }
+    }
+    Finish(std::move(png));
+  }
+  void AgentHostClosed(content::DevToolsAgentHost* agent_host) override {
+    Finish(std::string());
+  }
+  std::string GetTypeForMetrics() override { return "Other"; }
+
+ private:
+  void Finish(std::string png) {
+    watchdog_.Stop();
+    if (host_) {
+      host_->DetachClient(this);
+      host_ = nullptr;
+    }
+    if (!png.empty()) {
+      ThumbCache()[space_id_] = {png, base::TimeTicks::Now()};
+    } else {
+      png.assign(reinterpret_cast<const char*>(kFallbackPng),
+                 sizeof(kFallbackPng));
+    }
+    if (callback_) {
+      std::move(callback_).Run(
+          base::MakeRefCounted<base::RefCountedBytes>(
+              std::vector<uint8_t>(png.begin(), png.end())));
+    }
+    delete this;  // self-owned; last statement, touches nothing afterwards
+  }
+
+  const int space_id_;
+  scoped_refptr<content::DevToolsAgentHost> host_;
+  content::WebUIDataSource::GotDataCallback callback_;
+  base::OneShotTimer watchdog_;
+};
+
+void ServeThumbnail(const std::string& path,
+                    content::WebUIDataSource::GotDataCallback callback) {
+  // Paths are "thumb/<id>.<cache-buster>.png"; the id is the digit run.
+  int space_id = 0;
+  const std::string rest = path.substr(6);  // strlen("thumb/")
+  for (char c : rest) {
+    if (c < '0' || c > '9') {
+      break;
+    }
+    space_id = space_id * 10 + (c - '0');
+  }
+  if (space_id <= 0) {
+    RespondPng(std::move(callback),
+               std::string(reinterpret_cast<const char*>(kFallbackPng),
+                           sizeof(kFallbackPng)));
+    return;
+  }
+
+  auto& cache = ThumbCache();
+  auto it = cache.find(space_id);
+  if (it != cache.end() &&
+      base::TimeTicks::Now() - it->second.at < base::Seconds(1)) {
+    RespondPng(std::move(callback), it->second.bytes);
+    return;
+  }
+
+  // Capture the space's active tab (the last one marked active).
+  std::string target_id;
+  if (const auto* space = SpaceManager::GetInstance()->Find(space_id)) {
+    for (const auto& tab : space->tabs) {
+      if (tab.active) {
+        target_id = tab.target_id;
+      }
+    }
+    if (target_id.empty() && !space->tabs.empty()) {
+      target_id = space->tabs.back().target_id;
+    }
+  }
+  auto host = target_id.empty()
+                  ? nullptr
+                  : content::DevToolsAgentHost::GetForId(target_id);
+  if (!host) {
+    RespondPng(std::move(callback),
+               std::string(reinterpret_cast<const char*>(kFallbackPng),
+                           sizeof(kFallbackPng)));
+    return;
+  }
+
+  auto* job = new ThumbnailJob(space_id, std::move(host), std::move(callback));
+  job->Run();
+}
 
 std::string SpacesJson() {
+  auto* manager = SpaceManager::GetInstance();
+  base::DictValue root;
+  root.Set("focused", manager->focused_space_id());
   base::ListValue spaces;
-  for (const auto& space : SpaceManager::GetInstance()->List()) {
+  for (const auto& space : manager->List()) {
     base::DictValue entry;
     entry.Set("id", space.id);
     entry.Set("name", space.name);
@@ -140,6 +376,7 @@ std::string SpacesJson() {
                   : "agentDelegatedToUser");
     entry.Set("agentTaskState", space.agent_task_state);
     entry.Set("windowShown", space.window_shown);
+    entry.Set("hasTabs", !space.tabs.empty());
     base::ListValue tabs;
     for (const auto& tab : space.tabs) {
       base::DictValue t;
@@ -151,9 +388,24 @@ std::string SpacesJson() {
     entry.Set("tabs", std::move(tabs));
     spaces.Append(std::move(entry));
   }
+  root.Set("spaces", std::move(spaces));
   std::string json;
-  base::JSONWriter::Write(base::Value(std::move(spaces)), &json);
+  base::JSONWriter::Write(base::Value(std::move(root)), &json);
   return json;
+}
+
+void CloseSpaceTabsAndSpace(SpaceManager* manager, int id) {
+  // Windowed tabs stay with the user (they are plain user tabs once shown);
+  // windowless tabs are destroyed through their agent hosts, which prunes
+  // the owning handler's bookkeeping via the destroyed-WebContents hook.
+  if (const auto* space = manager->Find(id)) {
+    for (const auto& tab : space->tabs) {
+      if (auto host = content::DevToolsAgentHost::GetForId(tab.target_id)) {
+        host->Close();
+      }
+    }
+  }
+  manager->Close(id);
 }
 
 }  // namespace
@@ -182,6 +434,10 @@ PrismSpacesUI::PrismSpacesUI(content::WebUI* web_ui)
             if (path == "app.js") {
               std::move(callback).Run(
                   base::MakeRefCounted<base::RefCountedString>(kAppJs));
+              return;
+            }
+            if (path.starts_with("thumb/")) {
+              ServeThumbnail(path, std::move(callback));
               return;
             }
             std::move(callback).Run(
@@ -215,30 +471,33 @@ void PrismSpacesUI::OnAction(const base::ListValue& args) {
   const std::string& action = args[1].GetString();
   SpaceManager* manager = SpaceManager::GetInstance();
 
-  if (action == "view") {
+  if (action == "create") {
+    // User-created space: agents may select but not drive it until claimed.
+    manager->Create("", SpaceManager::Owner::kUser);
+  } else if (action == "deleteAll") {
+    for (const auto& space : manager->List()) {
+      CloseSpaceTabsAndSpace(manager, space.id);
+    }
+  } else if (action == "view" || action == "focus") {
     if (auto* delegate = GetSpaceWindowDelegate()) {
       // Tabs already live in the window when shown; windowless ones would be
       // handed over by the owning handler's Prism.showTaskSpace. From the
       // page there is nothing to move — the delegate just opens/focuses.
+      manager->set_focused_space_id(id);
       delegate->ShowTaskSpace(id, {});
+      manager->SetWindowShown(id, true);
     }
   } else if (action == "handoff") {
     manager->HandOff(id);
   } else if (action == "takeover") {
     manager->TakeOver(id);
   } else if (action == "close") {
-    // Windowed tabs stay with the user (they are plain user tabs once shown);
-    // windowless tabs are destroyed through their agent hosts, which prunes
-    // the owning handler's bookkeeping via the destroyed-WebContents hook.
-    if (const auto* space = manager->Find(id)) {
-      for (const auto& tab : space->tabs) {
-        if (auto host = content::DevToolsAgentHost::GetForId(tab.target_id)) {
-          host->Close();
-        }
-      }
-    }
-    manager->Close(id);
+    CloseSpaceTabsAndSpace(manager, id);
   }
+
+  // Push the mutated state immediately instead of waiting for the poll.
+  web_ui()->CallJavascriptFunctionUnsafe("prismSpaces.onData",
+                                         base::ValueView(SpacesJson()));
 }
 
 }  // namespace prism

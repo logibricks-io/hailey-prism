@@ -1,0 +1,51 @@
+Subject: [PATCH 0011] Prism: agent-in-control banner + Dock badge sources
+
+Compiles the Phase 5 chrome-layer additions into static_library("ui"):
+- prism_dock_badge.h / prism_dock_badge_mac.mm: the macOS Dock tile badge
+  counting agent-controlled spaces (driven by the delegate's 1s sync)
+- the agent-in-control ConfirmInfoBar (Take over / Stop agent) itself
+  lives in prism_space_window_delegate.cc, already listed by patch 0008
+- infobar_delegate.h + enums.xml: append PRISM_AGENT_BANNER_INFOBAR_DELEGATE
+  to the InfoBarIdentifier enum (LINT.IfChange/ThenChange pair kept in sync)
+
+The BUILD.gn sources are inserted past patch 0008's hunk context so every
+patch in the series stays individually reverse-applicable.
+
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+index 90952d43b6..77838aad7c 100644
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -1423,6 +1423,9 @@ static_library("ui") {
+       "browser_command_controller.h",
+       "browser_commands.cc",
+       "browser_commands.h",
++      # Prism: agent-in-control banner + Dock badge (Phase 5, mac-only).
++      "//chrome/browser/prism/prism_dock_badge.h",
++      "//chrome/browser/prism/prism_dock_badge_mac.mm",
+       "browser_content_setting_bubble_model_delegate.cc",
+       "browser_content_setting_bubble_model_delegate.h",
+       "browser_live_tab_context.cc",
+diff --git a/components/infobars/core/infobar_delegate.h b/components/infobars/core/infobar_delegate.h
+index 0751e0b9c6..5a48bb6176 100644
+--- a/components/infobars/core/infobar_delegate.h
++++ b/components/infobars/core/infobar_delegate.h
+@@ -208,6 +208,7 @@ class InfoBarDelegate {
+     JS_OPTIMIZATIONS_INFOBAR_DELEGATE = 133,
+     WEB_APP_BLOCKED_MIGRATION_INFOBAR_DELEGATE = 134,
+     OSCRYPTASYNC_AVAILABILITY_INFOBAR_DELEGATE = 135,
++    PRISM_AGENT_BANNER_INFOBAR_DELEGATE = 136,
+   };
+   // LINT.ThenChange(//tools/metrics/histograms/metadata/browser/enums.xml:InfoBarIdentifier)
+
+diff --git a/tools/metrics/histograms/metadata/browser/enums.xml b/tools/metrics/histograms/metadata/browser/enums.xml
+index d004385fbf..9ec4945d7a 100644
+--- a/tools/metrics/histograms/metadata/browser/enums.xml
++++ b/tools/metrics/histograms/metadata/browser/enums.xml
+@@ -368,6 +368,7 @@ chromium-metrics-reviews@google.com.
+   <int value="133" label="JS_OPTIMIZATIONS_INFOBAR_DELEGATE"/>
+   <int value="134" label="WEB_APP_BLOCKED_MIGRATION_INFOBAR_DELEGATE"/>
+   <int value="135" label="OSCRYPTASYNC_AVAILABILITY_INFOBAR_DELEGATE"/>
++  <int value="136" label="PRISM_AGENT_BANNER_INFOBAR_DELEGATE"/>
+ </enum>
+
+ <!-- LINT.ThenChange(//components/infobars/core/infobar_delegate.h:InfoBarIdentifier) -->

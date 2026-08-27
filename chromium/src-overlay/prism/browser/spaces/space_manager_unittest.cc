@@ -123,4 +123,45 @@ TEST(SpaceManagerTest, RemoveTabPromotesThePreviousTab) {
   EXPECT_TRUE(space->tabs.empty());
 }
 
+TEST(SpaceManagerTest, FocusedSpaceDefaultsToZeroAndIsSettable) {
+  SpaceManager manager;
+  EXPECT_EQ(manager.focused_space_id(), 0);
+
+  auto created = manager.Create("demo", SpaceManager::Owner::kUser);
+  manager.set_focused_space_id(created.space->id);
+  EXPECT_EQ(manager.focused_space_id(), created.space->id);
+}
+
+TEST(SpaceManagerTest, ClosingTheFocusedSpaceResetsFocusToDefault) {
+  SpaceManager manager;
+  auto created = manager.Create("demo", SpaceManager::Owner::kAgent);
+  const int id = created.space->id;
+  manager.set_focused_space_id(id);
+
+  EXPECT_EQ(manager.Close(id), SpaceManager::Error::kNone);
+  EXPECT_EQ(manager.focused_space_id(), 0);
+}
+
+TEST(SpaceManagerTest, StopAgentMakesAgentSpaceUserOwned) {
+  SpaceManager manager;
+  auto created = manager.Create("demo", SpaceManager::Owner::kAgent);
+  const int id = created.space->id;
+
+  auto stopped = manager.StopAgent(id);
+  EXPECT_EQ(stopped.error, SpaceManager::Error::kNone);
+  EXPECT_EQ(stopped.space->ownership, SpaceManager::Ownership::kUser);
+  // A user-owned space rejects agent selection (binding contract §2.3).
+  EXPECT_EQ(manager.Use(id).error, SpaceManager::Error::kUserInControl);
+
+  EXPECT_EQ(manager.StopAgent(999).error, SpaceManager::Error::kNotFound);
+}
+
+TEST(SpaceManagerTest, StopAgentOnUserSpaceIsANoOp) {
+  SpaceManager manager;
+  auto created = manager.Create("demo", SpaceManager::Owner::kUser);
+  auto stopped = manager.StopAgent(created.space->id);
+  EXPECT_EQ(stopped.error, SpaceManager::Error::kNone);
+  EXPECT_EQ(stopped.space->ownership, SpaceManager::Ownership::kUser);
+}
+
 }  // namespace prism

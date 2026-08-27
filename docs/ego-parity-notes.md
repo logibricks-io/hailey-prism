@@ -93,9 +93,25 @@ skills) is structurally equivalent; theirs is one static binary.
 
 ## Updated gap list (supersedes earlier versions where they conflict)
 
-1. Snapshot text density/role curation (see above).
-2. Spaces overview UI + ⌥S quick switcher + in-window space switching.
-3. Agent-in-control banner with Take over/Stop in the space view.
+1. ~~Snapshot text density/role curation~~ — **landed** (see Status above).
+2. ~~Spaces overview UI + ⌥S quick switcher + in-window space switching~~ —
+   **landed** (Phase 5): chrome://prism-spaces is now a Mission-Control card
+   wall — live tab thumbnails (captured on demand via an internal DevTools
+   session, 1s cache), ownership/state chips, a "+" create card, and a
+   Delete-all action. Switching: View → "Show Next Space" (⌥S) cycles
+   [main browsing area] + spaces by id; View → "Spaces Overview" (⌘⇧S) opens
+   the wall. ego's toolbar activity badge maps to a macOS Dock badge counting
+   agent-controlled spaces (no toolbar button — the pragmatic equivalent).
+   Screenshot: assets/phase5-spaces-overview.png (card wall). The banner was
+   verified on-screen via the OS-level accessibility tree (CDP screenshots
+   exclude native chrome; this shell lacks Screen Recording permission, so
+   no durable banner capture is kept).
+3. ~~Agent-in-control banner~~ — **landed**: a space window whose space is
+   agent-owned shows an infobar "<name> · Agent is in control" with
+   **Take over** (handoff: kAgentDelegatedToUser) and **Stop agent**
+   (ownership → kUser; the agent can only re-enter by claiming). A 1s sync in
+   the space-window delegate reconciles the banner and Dock badge with
+   SpaceManager state, so CDP-driven handoffs surface without polling.
 4. Full Chrome data import (cookies/passwords/extensions) with first-run
    user-present keychain authorization.
 5. Signed/notarized distribution + auto-update channel.
