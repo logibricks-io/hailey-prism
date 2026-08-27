@@ -31,16 +31,16 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 OUT_DIR = os.path.join(HERE, "out")
 
 TILE = 1024
-SQUIRCLE_RADIUS = 225          # macOS-style continuous corner
-TILE_TOP = (0x26, 0x26, 0x2B)  # vertical gradient, top
-TILE_BOTTOM = (0x14, 0x14, 0x17)
-BRICK = (0xED, 0xED, 0xE8)     # ivory
-DOT = (0xC8, 0x7B, 0x5D)       # terracotta accent
+SQUIRCLE_RADIUS = 223          # macOS continuous corner (~57% of half-width)
+TILE_TOP = (0xFB, 0xFB, 0xF9)  # warm-white vertical gradient (sketch-faithful)
+TILE_BOTTOM = (0xEF, 0xEF, 0xEA)
+BRICK = (0x18, 0x18, 0x18)     # measured from the sketch: #181818
+DOT = (0xC8, 0x78, 0x58)       # measured from the sketch: #C87858
 
-# Motif geometry, normalized from the sketch (640x638): brick size 140 with
-# 50px gaps (pitch 190); the L-grid cells below; terracotta dot at top-right.
-_BRICK = 140
-_CELLS = [  # (col, row) of the ivory bricks
+# Motif geometry measured from the sketch (640x638): brick 158, pitch 209,
+# brick corner radius 21, dot radius 71 centered on cell (2,0).
+_BRICK = 158
+_CELLS = [  # (col, row) of the dark bricks
     (0, 0),
     (0, 1),
     (0, 2),
@@ -48,9 +48,9 @@ _CELLS = [  # (col, row) of the ivory bricks
     (2, 2),
 ]
 _DOT_CELL = (2, 0)
-_CELL_PITCH = 190
-_DOT_RADIUS = 70
-_BRICK_RADIUS = 28             # 20% of the brick size, as in the sketch
+_CELL_PITCH = 209
+_DOT_RADIUS = 71
+_BRICK_RADIUS = 21             # measured from the sketch's corner curve
 
 MOTIF_W = 2 * _CELL_PITCH + _BRICK
 MOTIF_H = 2 * _CELL_PITCH + _BRICK
@@ -100,19 +100,28 @@ def _draw_motif(canvas, origin, scale):
               fill=DOT + (255,))
 
 
+SS = 4  # supersampling factor: render large, downscale for hairline edges
+
+
 def render(px):
-    """Full app icon at px pixels: dark squircle tile with the motif."""
+    """Full app icon at px pixels: squircle tile with the brand motif."""
+    if px * SS <= 4096:
+        return render(px * SS).resize((px, px), Image.LANCZOS) if px < TILE else _render_exact(px)
+    return _render_exact(px)
+
+
+def _render_exact(px):
     canvas = Image.new("RGBA", (px, px), (0, 0, 0, 0))
     scale = px / TILE
 
     tile = _vertical_gradient(px, TILE_TOP, TILE_BOTTOM)
     canvas.paste(tile, (0, 0), _squircle_mask(px, int(SQUIRCLE_RADIUS * scale)))
 
-    # Subtle top-edge inner highlight for depth.
+    # Hairline inner edge so the light tile reads on light docks.
     hl = Image.new("RGBA", (px, px), (0, 0, 0, 0))
     ImageDraw.Draw(hl).rounded_rectangle(
         [1, 1, px - 2, px - 2], radius=int(SQUIRCLE_RADIUS * scale),
-        outline=(255, 255, 255, 28), width=max(1, int(3 * scale)))
+        outline=(0, 0, 0, 14), width=max(1, int(2 * scale)))
     canvas.alpha_composite(hl)
 
     motif_w = MOTIF_W * scale
