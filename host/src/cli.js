@@ -39,6 +39,7 @@ import {
   kernelSocketCandidates,
   kernelTransportEnabled,
 } from "./kernel.js";
+import { runUpgrade as runUpgradeFlow } from "./upgrade.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // Harness bundle resolution: the app bundle ships it at
@@ -181,7 +182,36 @@ async function main() {
       if (kernel) return;
       await client.call("host.reset");
     },
-    printUpdateBanner: () => {},
+    // The startup banner reads only the update-check CACHE (never the
+    // network) and kicks a background refresh for next time — a command must
+    // never block on a release server. Line format comes from the harness
+    // (composeNotice), shared with the SDK trailer. The version query goes
+    // through the globalThis.prism binding so the update status merge
+    // (kernel.js / daemon.js) applies.
+    printUpdateBanner: (stream) => {
+      const work = (async () => {
+        const info = await globalThis.prism.getBrowserVersion();
+        const line = harness.composeNotice(info);
+        if (line) stream.write(`${line}\n`);
+      })();
+      // Bounded: the banner may delay a command by at most 1.5s; a slow
+      // bridge or missing cache just means no line.
+      const bounded = Promise.race([
+        work,
+        new Promise((resolve) => setTimeout(resolve, 1500)),
+      ]);
+      bounded.catch(() => {});
+      return bounded;
+    },
+    runUpgrade: async (stream, opts = {}) => {
+      const info = await globalThis.prism.getBrowserVersion();
+      const currentVersion = info?.currentVersion || "unknown";
+      return runUpgradeFlow({
+        currentVersion,
+        log: (line) => stream.write(`${line}\n`),
+        dryRun: opts.dryRun === true,
+      });
+    },
   };
 
   try {

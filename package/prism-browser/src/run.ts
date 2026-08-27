@@ -21,8 +21,9 @@ type ReadableLike = {
 
 type RunServices = {
   resetConnection(): Promise<void>;
-  printUpdateBanner(stream: WritableLike): void;
+  printUpdateBanner(stream: WritableLike): void | Promise<void>;
   runDoctor(stream: WritableLike): Promise<number>;
+  runUpgrade(stream: WritableLike, options: { dryRun?: boolean }): Promise<number>;
 };
 
 export type RunMainOptions = {
@@ -50,6 +51,8 @@ Helpers are pre-imported and the browser connection is prepared automatically.
 Commands:
   prism-browser --doctor         inspect browser and connection state
   prism-browser --reload         reset the browser connection on next call
+  prism-browser upgrade          check for a newer Prism and install it
+  prism-browser upgrade --dry-run  print the upgrade plan without changing anything
 `;
 
 export const USAGE = `Usage:
@@ -67,6 +70,7 @@ export async function runMain(options: RunMainOptions = {}) {
     resetConnection: async () => {},
     printUpdateBanner: () => {},
     runDoctor: async () => 0,
+    runUpgrade: async () => 0,
     ...options.services,
   };
 
@@ -81,6 +85,13 @@ export async function runMain(options: RunMainOptions = {}) {
     await services.resetConnection();
     write(stdout, "browser connection reset on next call\n");
     return 0;
+  }
+  if (argv[0] === "upgrade") {
+    // The mechanics (check/download/mount/swap/reopen) live host-side in
+    // host/src/upgrade.js; this layer only owns argv parsing.
+    return services.runUpgrade(stdout, {
+      dryRun: argv.includes("--dry-run"),
+    });
   }
   if (argv[0] === "--debug-clicks") {
     env.PRISM_BROWSER_DEBUG_CLICKS = "1";
@@ -100,7 +111,10 @@ export async function runMain(options: RunMainOptions = {}) {
     return 2;
   }
 
-  services.printUpdateBanner(stderr);
+  // The host's banner implementation returns a bounded promise (cache-only
+  // read + a capped bridge call); awaiting it here costs milliseconds in the
+  // common case and keeps the line from racing process teardown.
+  await Promise.resolve(services.printUpdateBanner(stderr));
   await execute(code, stdout);
   return 0;
 }

@@ -35,6 +35,10 @@ type InstallPrismSdkOptions = {
 
 export * from "./helpers.js";
 export { runMain } from "./run.js";
+// The banner line format is the CLI surface too (host/src/cli.js prints it
+// from its own transport), so composeNotice is a package export — one source
+// of truth, no drift between the SDK trailer and the CLI banner.
+export { composeNotice, NOTICE_PREFIX } from "./update-notice.js";
 
 const SYNC_HELPERS = new Set(["help"]);
 const SYNC_FACTORY_HELPERS = new Set([

@@ -23,6 +23,7 @@ import { CdpConnection } from "./cdp.js";
 import { resolveBrowserPath, defaultProfileDir, spawnBrowser } from "./chrome.js";
 import { PipeTransport } from "./pipe.js";
 import { SpaceRegistry } from "./spaces.js";
+import { mergeUpdateStatus } from "./update.js";
 import { snapshotTarget } from "./snapshot.js";
 
 export const SOCKET_PATH =
@@ -271,10 +272,13 @@ class HostServer {
 
       case "getBrowserVersion": {
         const info = await this.#cdp.send("Browser.getVersion");
-        return {
+        // Update status comes from the CLI-layer check cache (write-behind —
+        // the daemon never blocks on the release channel); the stock-Chrome
+        // fallback reports no update.
+        return mergeUpdateStatus({
           currentVersion: info.product || "unknown",
           updateAvailable: false,
-        };
+        });
       }
 
       case "listTaskSpaces":

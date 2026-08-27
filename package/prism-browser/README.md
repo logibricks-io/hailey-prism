@@ -34,6 +34,10 @@ JS
 
 Flags: `-h | --help`, `--doctor`, `--reload`, `--debug-clicks`.
 
+Commands: `upgrade` (check for a newer Prism release and install it; `--dry-run`
+prints the plan without changing anything). The update endpoint defaults to the
+GitHub Releases latest API and is overridable with `PRISM_UPDATE_URL`.
+
 ## Skill workspace
 
 By default the runtime loads agent helpers and site learnings from the sibling skill package:

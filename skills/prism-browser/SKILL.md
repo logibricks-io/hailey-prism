@@ -26,7 +26,10 @@ EOF
 ```
 
 There is no `nodejs` subcommand; stdin is the script. `prism-browser --doctor`
-checks connectivity; `--reload` resets the browser connection.
+checks connectivity; `--reload` resets the browser connection. `prism-browser
+upgrade` checks for a newer Prism release and installs it (`--dry-run` prints
+the plan without changing anything); when a newer release exists, a
+`[prism-browser:notice]` line trails command output telling the agent to run it.
 
 ## Quick start
 

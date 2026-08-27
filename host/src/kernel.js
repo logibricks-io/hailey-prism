@@ -23,6 +23,7 @@ import path from "node:path";
 
 import { snapshotTarget } from "./snapshot.js";
 import { defaultProfileDir } from "./chrome.js";
+import { mergeUpdateStatus } from "./update.js";
 
 // The kernel binds its listener per profile when launched with
 // --user-data-dir (every dev/test spawn) and at the global default otherwise.
@@ -258,7 +259,8 @@ export function buildKernelPrismBindings(kernel) {
   prism.handOffTaskSpace = () => call("handOffTaskSpace", {}, "taskSpace");
   prism.takeOverTaskSpace = () => call("takeOverTaskSpace", {}, "taskSpace");
   prism.showTaskSpace = (id) => call("showTaskSpace", { id });
-  prism.getBrowserVersion = () => call("getBrowserVersion");
+  prism.getBrowserVersion = async () =>
+    mergeUpdateStatus(await call("getBrowserVersion"));
   prism.listTabs = () => call("listTabs");
   prism.createTab = (url) => call("createTab", { url });
 
