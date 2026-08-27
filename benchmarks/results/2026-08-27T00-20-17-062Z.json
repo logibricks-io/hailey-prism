@@ -1,0 +1,31 @@
+{
+  "results": [
+    {
+      "task": "ticket-rush",
+      "tool": "prism",
+      "wallMs": 12546,
+      "cliWallMs": 11738,
+      "cliCalls": 177,
+      "snapshotBytes": 11503,
+      "ok": true
+    },
+    {
+      "task": "form-flow",
+      "tool": "prism",
+      "wallMs": 317,
+      "cliWallMs": 272,
+      "cliCalls": 69,
+      "snapshotBytes": 1105,
+      "ok": true
+    },
+    {
+      "task": "list-scrape",
+      "tool": "prism",
+      "wallMs": 401,
+      "cliWallMs": 363,
+      "cliCalls": 60,
+      "snapshotBytes": 6047,
+      "ok": true
+    }
+  ]
+}

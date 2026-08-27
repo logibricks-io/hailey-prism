@@ -318,6 +318,18 @@ Response PrismDomainHandler::CreateTab(const String& in_url,
       content::DevToolsManager::GetInstance()->delegate();
   content::BrowserContext* browser_context =
       delegate ? delegate->GetDefaultBrowserContext() : nullptr;
+  // Startup race: "last used profile" only exists once the profile finishes
+  // loading, which lags behind the agent socket coming up. Fall back to the
+  // context of any already-live page target (the launch window's tab).
+  if (!browser_context) {
+    for (const auto& host : content::DevToolsAgentHost::GetOrCreateAll()) {
+      content::WebContents* wc = host->GetWebContents();
+      if (wc && wc->GetBrowserContext()) {
+        browser_context = wc->GetBrowserContext();
+        break;
+      }
+    }
+  }
   if (!browser_context) {
     return ErrorResponse(prism::kErrBrowserUnavailable,
                          "no default browser context");
@@ -352,6 +364,17 @@ Response PrismDomainHandler::CreateTab(const String& in_url,
 
   tab_observers_[target_id] =
       std::make_unique<TabObserver>(web_contents.get(), this);
+
+  // A shown space gets its new tabs in its window directly (Phase 4 leftover):
+  // ownership moves to the tab strip; the handler no longer owns it.
+  const auto* space = space_manager_->Find(*selected_space_id_);
+  if (space->window_shown && prism::GetSpaceWindowDelegate() &&
+      prism::GetSpaceWindowDelegate()->AppendTabToSpaceWindow(
+          *selected_space_id_, std::move(web_contents))) {
+    *out_targetId = target_id;
+    return Response::Success();
+  }
+
   tabs_[target_id] = std::move(web_contents);
 
   *out_targetId = target_id;

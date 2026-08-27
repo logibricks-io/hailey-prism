@@ -30,6 +30,9 @@ class PrismSpaceWindowDelegate : public SpaceWindowDelegate {
       std::vector<std::unique_ptr<content::WebContents>> windowless_tabs)
       override;
   void AnimateClickHighlight(int space_id, int x, int y) override;
+  bool AppendTabToSpaceWindow(int space_id,
+                              std::unique_ptr<content::WebContents> tab)
+      override;
 
  private:
   // Validated lookup: the tracked window, or nullptr when it was closed.

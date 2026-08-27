@@ -115,6 +115,17 @@ void PrismSpaceWindowDelegate::ShowTaskSpace(
   browser->GetWindow()->Activate();
 }
 
+bool PrismSpaceWindowDelegate::AppendTabToSpaceWindow(
+    int space_id, std::unique_ptr<content::WebContents> tab) {
+  BrowserWindowInterface* browser = FindSpaceWindow(space_id);
+  if (!browser) {
+    return false;
+  }
+  browser->GetTabStripModel()->AppendWebContents(std::move(tab),
+                                                 /*foreground=*/false);
+  return true;
+}
+
 void PrismSpaceWindowDelegate::AnimateClickHighlight(int space_id,
                                                      int x,
                                                      int y) {

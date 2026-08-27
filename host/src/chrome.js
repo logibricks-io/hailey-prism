@@ -47,17 +47,23 @@ export function defaultProfileDir() {
 // the kernel transport then talks to its agent socket (the fork starts the
 // listener unconditionally). Detached + unref'd so the browser outlives a
 // short-lived CLI process and can serve later clients.
-export function spawnBrowser({ browserPath, profileDir, extraArgs = [], usePipe = true }) {
-  fs.mkdirSync(profileDir, { recursive: true });
-  const args = [
-    `--user-data-dir=${profileDir}`,
-    "--no-first-run",
-    "--no-default-browser-check",
-    "--disable-session-crashed-bubble",
-    "--hide-crash-restore-bubble",
-    ...extraArgs,
-    "about:blank",
-  ];
+//
+// With useDefaultProfile:true (bundled CLI launching its own app) no
+// --user-data-dir and no positional URL are passed: the app keeps its real
+// profile (where the global agent socket lives) and its normal startup tabs.
+export function spawnBrowser({ browserPath, profileDir, extraArgs = [], usePipe = true, useDefaultProfile = false }) {
+  const args = [...extraArgs];
+  if (!useDefaultProfile) {
+    fs.mkdirSync(profileDir, { recursive: true });
+    args.unshift(
+      `--user-data-dir=${profileDir}`,
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--disable-session-crashed-bubble",
+      "--hide-crash-restore-bubble",
+    );
+    args.push("about:blank");
+  }
   if (usePipe) {
     args.unshift("--remote-debugging-pipe");
     return spawn(browserPath, args, {

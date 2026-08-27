@@ -39,6 +39,62 @@ STAGING="$DIST_DIR/.staging-$ARCH"
 echo "==> packaging $APP"
 echo "    version: $VERSION"
 
+# --- CLI bundling (self-contained prism-browser inside the app) -------------
+# Layout under Prism.app/Contents/Resources/prism/:
+#   cli/       host/src runtime (the CLI entry is cli/cli.js)
+#   harness/   package/prism-browser/dist/out/index.js (built below)
+#   skills/    skills/prism-browser (the default agent workspace; the harness
+#              resolves it bundle-relative when PRISM_BROWSER_AGENT_WORKSPACE
+#              is unset)
+#   prism-node a self-contained official Node.js binary (nodejs.org dist,
+#              pinned below; the build machine's node is NOT used — homebrew
+#              node links ~12 cellar dylibs that would not ship)
+# plus Resources/prism-browser, the symlinkable exec wrapper.
+NODE_VERSION="v24.20.0"
+NODE_CACHE="$DIST_DIR/.node-cache"
+PAYLOAD="$APP/Contents/Resources/prism"
+WRAPPER="$APP/Contents/Resources/prism-browser"
+
+echo "==> bundling the prism-browser CLI into the app"
+( cd "$PRISM_REPO_ROOT/package/prism-browser" && npm run build ) || {
+  echo "ERROR: harness build failed" >&2; exit 1; }
+
+rm -rf "$PAYLOAD"
+mkdir -p "$PAYLOAD/cli" "$PAYLOAD/harness"
+cp "$PRISM_REPO_ROOT"/host/src/*.js "$PAYLOAD/cli/"
+cp "$PRISM_REPO_ROOT/package/prism-browser/dist/out/index.js" "$PAYLOAD/harness/index.js"
+rsync -a --exclude learnings --exclude node_modules \
+  "$PRISM_REPO_ROOT/skills/prism-browser/" "$PAYLOAD/skills/prism-browser/"
+
+NODE_TARBALL="node-$NODE_VERSION-darwin-$ARCH.tar.gz"
+mkdir -p "$NODE_CACHE"
+if [ ! -f "$NODE_CACHE/$NODE_TARBALL" ]; then
+  echo "==> fetching node $NODE_VERSION (darwin-$ARCH)"
+  curl -fL --retry 3 -o "$NODE_CACHE/$NODE_TARBALL" \
+    "https://nodejs.org/dist/$NODE_VERSION/$NODE_TARBALL" || {
+      echo "ERROR: node runtime download failed" >&2; exit 1; }
+fi
+tar -xzf "$NODE_CACHE/$NODE_TARBALL" -C "$NODE_CACHE"
+cp "$NODE_CACHE/node-$NODE_VERSION-darwin-$ARCH/bin/node" "$PAYLOAD/prism-node"
+chmod +x "$PAYLOAD/prism-node"
+"$PAYLOAD/prism-node" --version
+
+cat > "$WRAPPER" <<'EOF'
+#!/bin/sh
+# prism-browser entry point: runs the bundled CLI on the bundled Node runtime.
+# Resolves through symlinks so ~/.local/bin/prism-browser works.
+SOURCE="$0"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  case "$SOURCE" in /*) ;; *) SOURCE="$DIR/$SOURCE" ;; esac
+done
+HERE="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+exec "$HERE/prism/prism-node" "$HERE/prism/cli/cli.js" "$@"
+EOF
+chmod +x "$WRAPPER"
+"$WRAPPER" --version >/dev/null 2>&1 || true  # smoke: must not hard-fail packaging
+
 # --- optional signing stage -------------------------------------------------
 if [ -n "${PRISM_SIGNING_IDENTITY:-}" ]; then
   echo "==> codesigning with '$PRISM_SIGNING_IDENTITY' (hardened runtime)"

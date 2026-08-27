@@ -41,7 +41,13 @@ import {
 } from "./kernel.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULT_BUNDLE = path.join(
+// Harness bundle resolution: the app bundle ships it at
+// Prism.app/Contents/Resources/prism/harness/index.js next to this file's
+// Resources/prism/cli/ home; the repo layout is the fallback (development).
+const BUNDLED_BUNDLE = path.join(HERE, "..", "harness", "index.js");
+const DEFAULT_BUNDLE = fs.existsSync(BUNDLED_BUNDLE)
+  ? BUNDLED_BUNDLE
+  : path.join(
   HERE,
   "..",
   "..",
@@ -97,15 +103,26 @@ async function tryKernelTransport() {
   } catch {
     // No listener yet.
   }
-  // Only an explicit fork binary may be auto-launched here — a stock build
-  // has no agent socket, so without PRISM_BROWSER_PATH we fall through to the
+  // Who may we launch? An explicit fork binary, or — when this CLI runs from
+  // inside Prism.app (Resources/prism/cli/) — the owning app itself (the
+  // real product path: the app keeps its default profile and its global
+  // agent socket).
+  const bundledBrowser = path.join(HERE, "..", "..", "..", "MacOS", "Prism");
+  const browserPath = process.env.PRISM_BROWSER_PATH ||
+    (fs.existsSync(bundledBrowser) ? bundledBrowser : null);
+  // Only an explicit fork binary or the bundled app may be auto-launched here
+  // — a stock build has no agent socket, so otherwise we fall through to the
   // daemon, which resolves and launches a browser on its own.
-  const browserPath = process.env.PRISM_BROWSER_PATH;
   if (!browserPath || !fs.existsSync(browserPath)) return null;
+  const ownApp = browserPath === bundledBrowser;
   spawnBrowser({
     browserPath,
     profileDir: defaultProfileDir(),
     usePipe: false,
+    // The bundled app launch keeps its real default profile (no
+    // --user-data-dir): that's where the global agent socket lives.
+    useDefaultProfile: ownApp,
+    extraArgs: ownApp ? ["--no-default-browser-check"] : [],
   });
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {

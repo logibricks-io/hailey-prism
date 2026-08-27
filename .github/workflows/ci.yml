@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The Chromium fork build is intentionally NOT part of CI: a pinned
+  # chromium checkout is a ~100GB fetch and needs a self-hosted macOS runner
+  # with depot_tools. Nightly fork builds + the kernel probe belong on that
+  # runner (planned: .github/workflows/nightly-prism-app.yml).
+  harness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package/prism-browser/package-lock.json
+
+      - name: Install harness dependencies
+        working-directory: package/prism-browser
+        run: npm ci
+
+      - name: Harness unit tests (build + typecheck + node --test)
+        working-directory: package/prism-browser
+        run: npm test
+
+      - name: Validate site skills
+        working-directory: package/prism-browser
+        run: npm run validate:site-skills
+
+  host-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Syntax-check host JS modules
+        run: |
+          for f in host/src/*.js host/scripts/*.mjs benchmarks/*.mjs e2e/soak.mjs; do
+            node --check "$f"
+          done
+
+      - name: Syntax-check the installer (POSIX sh)
+        run: sh -n skills/prism-browser/scripts/install.sh

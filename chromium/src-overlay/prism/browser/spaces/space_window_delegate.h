@@ -37,6 +37,11 @@ class SpaceWindowDelegate {
   // Brief click-highlight marker at (x, y) — page coordinates of the space
   // window's active tab; no-op when the space is not shown.
   virtual void AnimateClickHighlight(int space_id, int x, int y) = 0;
+
+  // Appends an already-loaded tab into the space's visible window. Returns
+  // false when the space has no live window (caller keeps it windowless).
+  virtual bool AppendTabToSpaceWindow(
+      int space_id, std::unique_ptr<content::WebContents> tab) = 0;
 };
 
 // Global injection point (browser process, UI thread).
