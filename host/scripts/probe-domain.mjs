@@ -185,15 +185,14 @@ async function runSnapshotSuite(cdp, fixtureOriginA, fixtureOriginB) {
     typeof snap.content === "string" && Array.isArray(snap.refs),
     `content=${snap.content?.length ?? "?"}B refs=${snap.refs?.length ?? "?"}`);
   check("snapshot: contains the OOPIF mid-frame button with a ref",
-    /- button "mid-level action" \[ref=\d+/.test(snap.content),
+    /button \[ref=\d+, loc=role:button\[name="mid-level action"\]\]/.test(snap.content),
     snap.content.split("\n").filter((l) => l.includes("mid-level")).join(" / "));
   check("snapshot: contains the third-level (leaf) input with a ref",
-    /- (textbox|searchbox) "leaf-level field" \[ref=\d+/.test(snap.content),
+    /textbox \[ref=\d+, loc=role:textbox\[name="leaf-level field"\]\]/.test(snap.content),
     snap.content.split("\n").filter((l) => l.includes("leaf-level")).join(" / "));
-  check("snapshot: link url annotation present",
-    /\[ref=\d+, loc=role:link\[name="top docs"\], url=https?:\/\//.test(snap.content) ||
-      /url=https?:\/\/.*top-docs/.test(snap.content),
-    snap.content.split("\n").filter((l) => l.includes("link")).slice(0, 2).join(" / "));
+  check("snapshot: link annotation is loc=href + url= in order",
+    /anchor \[ref=\d+, loc=href:https?:\/\/[^,]+, url=https?:\/\//.test(snap.content),
+    snap.content.split("\n").filter((l) => l.includes("anchor")).slice(0, 2).join(" / "));
   const lineOf = (needle) => snap.content.split("\n").find((l) => l.includes(needle)) ?? "";
   const indentOf = (needle) => lineOf(needle).match(/^ */)[0].length;
   check("snapshot: iframe content is nested below its owner",

@@ -37,6 +37,30 @@ links. Theirs is measurably denser (LLM-token-friendlier). This is now the
 format to beat; ours still wins on OOPIF composition (theirs untested here,
 their claim is nested-iframe robustness).
 
+**Status (2026-08-27): ALIGNED.** The kernel composer
+(`prism/browser/snapshot/snapshot_composer.{h,cc}`) and the JS fallback
+(`host/src/snapshot.js`) both emit the curated format; the example.com output
+matches the sample above line for line (only the ref number differs, which is
+allowed by contract — backendNodeIds are process-assigned):
+
+```
+root
+  heading
+    text "Example Domain"
+  paragraph
+    text "This domain is for use in documentation examples without needing permission. Avoid use in operations."
+  paragraph
+    anchor [ref=13, loc=href:https://iana.org/domains/example, url=https://iana.org/domains/example]
+      text "Learn more"
+```
+
+Format deltas we keep deliberately: no dash prefixes on lines (matches the
+sample), refs are actionable-only, `textbox` lines may include the current
+`value` when set (form state). Density on a real page
+(news.ycombinator.com): 1603 → 969 lines, 92.2KB → 57.2KB (-40%/-38%),
+refs 1118 → 230 (actionable-only). OOPIF expansion is preserved — nested
+iframes still compose inline (probe fixture: 3 levels, cross-process, green).
+
 ## Spaces product model (GUI recon)
 
 - **A Space is an in-window tab set** (Arc/Safari-style): switching spaces

@@ -14,12 +14,54 @@ namespace prism {
 
 namespace {
 
-// Same actionable-role list as the JS composer (host/src/snapshot.js).
+// ego-parity curated roles (docs/ego-parity-notes.md): semantic lowercase
+// HTML-flavored names instead of raw AX roles.
+std::string MapRole(const std::string& role) {
+  static const std::map<std::string, std::string>* mapping =
+      new std::map<std::string, std::string>{
+          {"RootWebArea", "root"}, {"link", "anchor"},
+          {"StaticText", "text"},  {"heading", "heading"},
+          {"paragraph", "paragraph"}, {"list", "list"},
+          {"listitem", "item"},    {"image", "image"},
+          {"img", "image"},        {"button", "button"},
+          {"searchbox", "textbox"}, {"textbox", "textbox"},
+          {"checkbox", "checkbox"}, {"radio", "radio"},
+          {"switch", "switch"},    {"combobox", "combobox"},
+          {"listbox", "listbox"},  {"menuitem", "menuitem"},
+          {"tab", "tab"},          {"option", "option"},
+          {"slider", "slider"},    {"spinbutton", "spinbutton"},
+      };
+  auto it = mapping->find(role);
+  if (it != mapping->end()) {
+    return it->second;
+  }
+  // Fallback: lowercase, spaces stripped (LayoutTableRow -> layouttablerow).
+  std::string out;
+  out.reserve(role.size());
+  for (char c : role) {
+    if (c == ' ') {
+      continue;
+    }
+    out.push_back(static_cast<char>(tolower(c)));
+  }
+  return out;
+}
+
+// Actionable roles (in the MAPPED namespace) get refs and loc= annotations;
+// everything else renders bare. Same set as the JS composer pre-densify.
 const std::set<std::string>& ActionableRoles() {
   static const std::set<std::string>* roles = new std::set<std::string>{
-      "button",   "link",     "textbox", "searchbox", "combobox",
-      "listbox",  "menuitem", "tab",     "checkbox",  "radio",
-      "switch",   "slider",   "spinbutton", "option",
+      "button",   "anchor",   "textbox", "combobox", "listbox",
+      "menuitem", "tab",      "checkbox", "radio",   "switch",
+      "slider",   "spinbutton", "option",
+  };
+  return *roles;
+}
+
+// Container roles print bare and carry their text as folded `text` children.
+const std::set<std::string>& ContainerRoles() {
+  static const std::set<std::string>* roles = new std::set<std::string>{
+      "root", "heading", "paragraph", "list", "item",
   };
   return *roles;
 }
@@ -44,6 +86,18 @@ struct ComposedNode {
   raw_ptr<const SnapshotFrameData> frame;  // the frame this node came from
   std::vector<ComposedNode> children;
 };
+
+bool HasActionableDescendant(const ComposedNode& node) {
+  for (const auto& child : node.children) {
+    if (child.ax && ActionableRoles().count(MapRole(child.ax->role))) {
+      return true;
+    }
+    if (HasActionableDescendant(child)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 struct FrameTree {
   raw_ptr<const SnapshotFrameData> frame = nullptr;
@@ -86,7 +140,7 @@ bool InViewport(const SnapshotAXNode& node, const SnapshotFrameData& frame) {
 class Renderer {
  public:
   Renderer(const SnapshotOptions& options, std::vector<SnapshotRefEntry>* refs,
-             std::string* content)
+           std::string* content)
       : options_(options), refs_(refs), content_(content) {}
 
   void Render(const ComposedNode& node, int depth) {
@@ -102,52 +156,113 @@ class Renderer {
           node.frame && !InViewport(*ax, *node.frame)) {
         return;  // off-viewport element: drop line and subtree
       }
-      RenderLine(*ax, depth);
-    }
-    for (const auto& child : node.children) {
-      Render(child, depth + 1);
+      RenderNode(node, depth);
+    } else {
+      RenderChildren(node, depth);
     }
   }
 
  private:
-  void RenderLine(const SnapshotAXNode& ax, int depth) {
+  void RenderChildren(const ComposedNode& node, int depth) {
+    // Consecutive `text` children merge into one line (space-joined).
+    std::string pending_text;
+    for (const auto& child : node.children) {
+      const SnapshotAXNode* cax = child.ax;
+      if (cax && MapRole(cax->role) == "text") {
+        const std::string& piece =
+            !cax->name.empty() ? cax->name : cax->value;
+        if (!piece.empty()) {
+          if (!pending_text.empty()) {
+            pending_text += " ";
+          }
+          pending_text += piece;
+          continue;
+        }
+      }
+      FlushText(pending_text, depth);
+      Render(child, depth);
+    }
+    FlushText(pending_text, depth);
+  }
+
+  void FlushText(std::string& pending_text, int depth) {
+    if (pending_text.empty()) {
+      return;
+    }
     std::string line(depth * 2, ' ');
-    line += "- ";
-    line += ax.role.empty() ? "node" : ax.role;
-    if (!ax.name.empty()) {
-      line += " \"" + ax.name + "\"";
-    } else if (!ax.value.empty()) {
-      line += " \"" + ax.value + "\"";
+    line += "text \"" + pending_text + "\"";
+    *content_ += line + "\n";
+    pending_text.clear();
+  }
+
+  void RenderNode(const ComposedNode& node, int depth) {
+    const SnapshotAXNode& ax = *node.ax;
+    const std::string role = MapRole(ax.role);
+
+    if (role == "text") {
+      // Rendered by the parent's merge pass.
+      RenderChildren(node, depth);
+      return;
+    }
+    if (ax.role == "InlineTextBox") {
+      return;  // folded into the parent StaticText; never rendered
+    }
+
+    const bool actionable = ActionableRoles().count(role) > 0;
+    const bool container = ContainerRoles().count(role) > 0;
+    const std::string& display = !ax.name.empty() ? ax.name : ax.value;
+
+    // Decorative/noise curation: unnamed, non-actionable, non-container nodes
+    // are skipped; their children hoist. Containers with interactive
+    // descendants keep their line (structure preserved).
+    if (!actionable && !container && display.empty()) {
+      if (!HasActionableDescendant(node)) {
+        RenderChildren(node, depth);
+        return;
+      }
+    }
+
+    std::string line(depth * 2, ' ');
+    line += role;
+
+    // Names: containers never print inline (folded text carries it); anchors
+    // never print inline (their text child carries it); other actionable
+    // nodes keep the name inside loc= only. Non-curated roles with a display
+    // string print it.
+    const bool print_inline =
+        !display.empty() && !container && !actionable;
+    if (print_inline) {
+      line += " \"" + display + "\"";
     }
 
     std::string annotations;
-    if (ax.backend_node_id > 0) {
+    if (actionable && ax.backend_node_id > 0) {
       annotations += "ref=" + std::to_string(ax.backend_node_id);
       if (!seen_refs_.count(ax.backend_node_id)) {
         seen_refs_.insert(ax.backend_node_id);
-        refs_->push_back(
-            {ax.backend_node_id, ax.role, ax.name});
+        refs_->push_back({ax.backend_node_id, role, ax.name});
       }
-    }
-    if (options_->include_stable_locator && !ax.name.empty() &&
-        ActionableRoles().count(ax.role)) {
-      if (!annotations.empty()) {
+      if (options_->include_stable_locator) {
         annotations += ", ";
+        if (role == "anchor" && !ax.url.empty()) {
+          annotations += "loc=href:" + ax.url;
+        } else if (!ax.name.empty()) {
+          annotations += "loc=role:" + role + "[name=\"" +
+                         EscapeLocatorName(ax.name) + "\"]";
+        } else {
+          annotations.pop_back();  // drop the dangling ", "
+          annotations.pop_back();
+        }
       }
-      annotations +=
-          "loc=role:" + ax.role + "[name=\"" + EscapeLocatorName(ax.name) +
-            "\"]";
-    }
-    if (!ax.url.empty()) {
-      if (!annotations.empty()) {
-        annotations += ", ";
+      if (!ax.url.empty()) {
+        annotations += ", url=" + ax.url;
       }
-      annotations += "url=" + ax.url;
     }
     if (!annotations.empty()) {
       line += " [" + annotations + "]";
     }
     *content_ += line + "\n";
+    RenderChildren(node, depth + 1);
   }
 
   const raw_ref<const SnapshotOptions> options_;
