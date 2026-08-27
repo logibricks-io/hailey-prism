@@ -257,6 +257,7 @@ export function buildKernelPrismBindings(kernel) {
   prism.closeTaskSpace = () => call("closeTaskSpace");
   prism.handOffTaskSpace = () => call("handOffTaskSpace", {}, "taskSpace");
   prism.takeOverTaskSpace = () => call("takeOverTaskSpace", {}, "taskSpace");
+  prism.showTaskSpace = (id) => call("showTaskSpace", { id });
   prism.getBrowserVersion = () => call("getBrowserVersion");
   prism.listTabs = () => call("listTabs");
   prism.createTab = (url) => call("createTab", { url });

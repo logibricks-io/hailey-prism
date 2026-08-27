@@ -126,4 +126,22 @@ skills) is structurally equivalent; theirs is one static binary.
    paths degrade to bookmarks+history with an honest per-item report. Full
    security-boundary writeup: docs/chrome-import.md.
 5. Signed/notarized distribution + auto-update channel.
-6. x64 build. 7. Bare-Meta input isolation. 8. Channel publishing.
+6. x64 build. 8. Channel publishing.
+7. ~~Bare-Meta input isolation~~ — **landed** (Phase 7): the leak path is the
+   shell's keyboard redispatch — a renderer-unhandled key event is re-injected
+   by `BrowserNativeWidgetMac::HandleKeyboardEvent` →
+   `CommandDispatcher::redispatchKeyEvent:` → `[NSApp sendEvent:]` (gated on
+   the window being key), which is where a synthetic bare Cmd escaped to the
+   macOS shortcut layer. Patch 0013 swallows the event when it is both
+   DevTools-synthetic (`kFromDebugger` — real user keys never carry it) and
+   modifier-only (`dom_code` is MetaLeft/MetaRight). Instrumented proof on the
+   fork: bare Meta reaches HandleKeyboardEvent and is swallowed (no
+   redispatch), while a synthetic Cmd+W chord still redispatches and closes
+   the tab (window key, no collateral damage). Caveat measured on macOS 26:
+   the original symptom (bare Cmd launching System Information) does not
+   reproduce there even on stock Chrome 152 frontmost — the e2e case is a
+   guard, not a live repro on this OS version. ego lite passes the same case
+   (they fixed it in their shell); stock Chrome passes it vacuously here.
+   Harness: `taskSpaces.show(nameOrId)` (kernel-only) fronts the space window
+   so the case is deterministic instead of focus-luck; the case is unskipped
+   in e2e/run.mjs.

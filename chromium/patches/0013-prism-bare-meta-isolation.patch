@@ -1,0 +1,46 @@
+Subject: [PATCH 0013] Prism: isolate DevTools-synthetic bare Meta from macOS
+
+BrowserNativeWidgetMac::HandleKeyboardEvent redispatches renderer-unhandled
+key events into [NSApp sendEvent:] (via CommandDispatcher), which leaks them
+to the macOS shortcut layer when the window is key — a bare synthetic Cmd
+(MetalLeft keyDown/keyUp via Input.dispatchKeyEvent) reaches the OS there and
+can launch system responses (observed: System Information).
+
+Swallow the event when BOTH hold: it is DevTools-synthetic
+(kFromDebugger — real user input never carries it) AND modifier-only
+(dom_code is MetaLeft/MetaRight, i.e. no key of its own). Synthetic Cmd
+chords (Cmd+C etc.) carry their own key's dom_code and redispatch exactly as
+before; in-page delivery of the bare Meta is unchanged (the renderer already
+saw it).
+diff --git a/chrome/browser/ui/views/frame/browser_native_widget_mac.mm b/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
+index 46037e7584..0a438b8298 100644
+--- a/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
++++ b/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
+@@ -59,6 +59,7 @@
+ #include "ui/base/l10n/l10n_util.h"
+ #include "ui/base/mojom/window_show_state.mojom.h"
+ #include "ui/base/ui_base_features.h"
++#include "ui/events/keycodes/dom/dom_code.h"
+ #include "ui/native_theme/native_theme.h"
+ #import "ui/views/cocoa/native_widget_mac_ns_window_host.h"
+ #include "ui/views/interaction/element_tracker_views.h"
+@@ -693,6 +694,19 @@ - (NSTouchBar*)makeTouchBar {
+ 
+ bool BrowserNativeWidgetMac::HandleKeyboardEvent(
+     const input::NativeWebKeyboardEvent& event) {
++  // Prism: swallow DevTools-synthetic *bare* Meta presses before they are
++  // redispatched into [NSApp sendEvent:] (which leaks them to the macOS
++  // shortcut layer when the window is key — bare Cmd there can trigger OS
++  // responses such as launching System Information). Only the kFromDebugger
++  // (Input.dispatchKeyEvent) traffic is affected; real user keys never carry
++  // that flag. Synthetic Cmd chords are unaffected: the chord's keyDown
++  // carries its own dom_code (e.g. KEY_C) — only a press whose dom_code IS
++  // MetaLeft/MetaRight (modifier-only, no key of its own) is swallowed.
++  if ((event.GetModifiers() & blink::WebInputEvent::kFromDebugger) &&
++      (event.dom_code == static_cast<int>(ui::DomCode::META_LEFT) ||
++       event.dom_code == static_cast<int>(ui::DomCode::META_RIGHT))) {
++    return true;
++  }
+   if (!ShouldHandleKeyboardEvent(event)) {
+     return false;
+   }

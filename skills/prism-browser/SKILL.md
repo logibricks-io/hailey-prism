@@ -102,7 +102,7 @@ watch it (a space window via `Prism.showTaskSpace`, or the
 chrome://prism-spaces management page) and take or hand back control at any
 time.
 
-Facade: `taskSpaces.list()`, `taskSpaces.new(name)`, `taskSpaces.useOrCreate(nameOrId)`, `taskSpaces.switch(nameOrId)`, `taskSpaces.claim(nameOrId)`, `taskSpaces.complete(nameOrId, { keep })`, `taskSpaces.handOff(nameOrId?)`, `taskSpaces.takeOver(nameOrId?)`, `taskSpaces.waitForAgentControl(nameOrId, { interval, timeout }?)` (seconds here).
+Facade: `taskSpaces.list()`, `taskSpaces.new(name)`, `taskSpaces.useOrCreate(nameOrId)`, `taskSpaces.switch(nameOrId)`, `taskSpaces.claim(nameOrId)`, `taskSpaces.complete(nameOrId, { keep })`, `taskSpaces.handOff(nameOrId?)`, `taskSpaces.takeOver(nameOrId?)`, `taskSpaces.show(nameOrId)` (kernel/fork only — opens or raises the space's window and activates the app), `taskSpaces.waitForAgentControl(nameOrId, { interval, timeout }?)` (seconds here).
 
 Ownership states: `agent` (the agent drives), `user` (the user's own space —
 agents cannot drive it), `agentDelegatedToUser` (handed off — user in control

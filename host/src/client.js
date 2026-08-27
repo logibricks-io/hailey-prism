@@ -128,6 +128,7 @@ export function buildPrismBindings(client) {
     closeTaskSpace: () => ({}),
     handOffTaskSpace: () => ({}),
     takeOverTaskSpace: () => ({}),
+    showTaskSpace: (id) => ({ id }),
     getBrowserVersion: () => ({}),
   };
 

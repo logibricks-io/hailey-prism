@@ -327,6 +327,14 @@ class HostServer {
         const space = this.#requireSelectedSpace(client);
         return this.#registry.takeOver(space.id);
       }
+      case "showTaskSpace":
+        // Spaces on this transport are simulated as isolated browser
+        // contexts — there is no shell window to show. The kernel (fork)
+        // transport implements the real thing.
+        throw hostError(
+          "showTaskSpace requires the kernel transport (simulated spaces have no windows)",
+          CODES.INVALID_ARGUMENT,
+        );
 
       case "listTabs": {
         const space = this.#requireSelectedSpace(client);

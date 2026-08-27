@@ -340,6 +340,23 @@ export async function handOffTaskSpace(nameOrId?: string | number) {
 }
 
 /**
+ * Show a task space in a visible browser window (fork shell only): opens or
+ * raises the space's window and activates the app. This is a kernel (Prism
+ * fork) capability — the daemon's simulated spaces have no shell windows, so
+ * on that transport this rejects.
+ * @param {string|number} nameOrId Task space id or name.
+ * @returns {Promise<{done: boolean}>} `{ done: true }` when a window hosts the space.
+ */
+export async function showTaskSpaceWindow(nameOrId: string | number) {
+  const prism = globalThis.prism;
+  if (!prism || typeof prism.showTaskSpace !== "function") {
+    throw new Error("showTaskSpaceWindow requires prism.showTaskSpace (kernel transport)");
+  }
+  const space = await findTaskSpace(nameOrId);
+  return assertNoPrismError(await prism.showTaskSpace(space.id), "showTaskSpaceWindow");
+}
+
+/**
  * Take over a task space, showing the agent overlay to indicate work has resumed.
  * @param {string|number} [nameOrId] Task space id or name. If provided, switches to that space first.
  * @returns {Promise<void>}
@@ -792,6 +809,7 @@ function createTaskSpacesFacade() {
     complete: completeTaskSpace,
     handOff: handOffTaskSpace,
     takeOver: takeOverTaskSpace,
+    show: showTaskSpaceWindow,
     waitForAgentControl,
   };
 }
@@ -813,7 +831,7 @@ const FACADE_HELP: Record<string, string> = {
   browser:
     "browser: tab facade. Use browser.listTabs(), browser.currentTab(), browser.switchTab(target), browser.openOrReuseTab(url, options), and browser.closeTab(target). Treat targetId as short-lived: obtain and validate it in the current script; switchTab/closeTab refresh the tab list before acting.",
   taskSpaces:
-    "taskSpaces: task-space facade. Use taskSpaces.useOrCreate(nameOrId), taskSpaces.claim(nameOrId), taskSpaces.switch(nameOrId), taskSpaces.complete(nameOrId, options), taskSpaces.handOff(nameOrId), taskSpaces.takeOver(nameOrId), and taskSpaces.waitForAgentControl(nameOrId, options).",
+    "taskSpaces: task-space facade. Use taskSpaces.useOrCreate(nameOrId), taskSpaces.claim(nameOrId), taskSpaces.switch(nameOrId), taskSpaces.complete(nameOrId, options), taskSpaces.handOff(nameOrId), taskSpaces.takeOver(nameOrId), taskSpaces.show(nameOrId), and taskSpaces.waitForAgentControl(nameOrId, options).",
   site: "site: learned site-skill facade. Use site.skills(url), site.skillsForUrl(url), site.runTool(siteId, toolName, args), site.runBrowserTool(siteId, toolName, args), and site.learnContext(url).",
   fetch:
     "fetch: network facade. Use fetch.server(url, options) for Node-side fetch and fetch.browser(url, options) for browser-origin fetch.",

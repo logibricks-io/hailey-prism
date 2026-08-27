@@ -41,17 +41,11 @@ if (!ffmpegAvailable()) {
   );
 }
 
-// "macOS bare Meta input isolation" verifies the browser shell swallows a
-// bare Cmd keyDown/keyUp before it reaches the macOS shortcut layer. That
-// isolation lived in ego-lite's app shell; under stock Chrome the synthetic
-// Meta reaches the OS and launches System Information whenever the dev window
-// is frontmost (focus-dependent; verified by probe). The adapter cannot fix
-// this without dropping legitimate Input.dispatchKeyEvent traffic, and every
-// Cmd chord starts with a Meta keyDown. Fork-era (shell) fix.
-DEFAULT_SKIPS.set(
-  "macOS bare Meta input isolation",
-  "bare-Meta input isolation is a browser-shell capability; stock Chrome forwards the synthetic Cmd to the macOS shortcut layer (launches System Information when the dev window is frontmost) and the CDP adapter cannot isolate OS-level input",
-);
+// "macOS bare Meta input isolation" runs by default on the fork: patch 0013
+// swallows DevTools-synthetic bare-Meta events before the shell redispatches
+// them into [NSApp sendEvent:] (the macOS shortcut layer). The case fronts
+// the space window itself via Prism.showTaskSpace so the probe is
+// deterministic rather than focus-luck.
 
 function binaryOnPath(name) {
   for (const dir of (process.env.PATH || "").split(path.delimiter)) {

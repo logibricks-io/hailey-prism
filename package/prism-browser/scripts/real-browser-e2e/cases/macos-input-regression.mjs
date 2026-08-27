@@ -11,8 +11,21 @@ export function macosInputRegressionCase() {
       return /bundleID="com\\.apple\\.SystemProfiler"/.test(stdout);
     }
 
-    await taskSpaces.useOrCreate(taskName);
+    const space = await taskSpaces.useOrCreate(taskName);
     await resetHome();
+
+    // The leak this case guards is focus-dependent: the shell redispatches an
+    // unhandled key into [NSApp sendEvent:] only while its window is key, so a
+    // run with no visible/focused window is a false green. On the fork,
+    // taskSpaces.show() (Prism.showTaskSpace) opens a real window for the
+    // selected space and activates the app (the delegate's Activate reaches
+    // [NSApp activateIgnoringOtherApps:]), making the probe deterministic.
+    // Simulated (daemon/stock) spaces have no shell windows; the catch keeps
+    // the original behavior there.
+    if (space && space.id != null) {
+      await taskSpaces.show(space.id).catch(() => {});
+      await page.waitForTimeout(500);
+    }
 
     const systemInformationWasRunning = await isSystemInformationRunning();
     assertEqual(
