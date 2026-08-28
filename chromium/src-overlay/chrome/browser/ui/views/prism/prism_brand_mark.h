@@ -33,15 +33,8 @@ gfx::ImageSkia CreateLogiBricksMarkImage(int size_px, SkColor brick_color);
 inline constexpr int kToolbarButtonImageSize = 18;
 inline constexpr int kToolbarButtonGlyphSize = 16;
 
-// Count badge: ~11 DIP dark circle with a white 9px numeral, anchored to the
-// glyph's bottom-right corner. Callers pass agent_count == 0 to hide it.
-inline constexpr float kBadgeRadius = 5.5f;
-
-// The toolbar button icon: 16 DIP glyph centered in the 18 DIP image, with
-// the running-background-agents count badge composited at the glyph's
-// bottom-right when |agent_count| >= 1 (composited into the image because
-// Button::OnPaint is final at this pin).
-gfx::ImageSkia CreateToolbarButtonIcon(SkColor brick_color, int agent_count);
+// The toolbar button icon: 16 DIP glyph centered in the 18 DIP image.
+gfx::ImageSkia CreateToolbarButtonIcon(SkColor brick_color);
 
 }  // namespace prism
 

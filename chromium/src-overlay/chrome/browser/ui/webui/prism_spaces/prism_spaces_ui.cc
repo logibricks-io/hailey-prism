@@ -15,10 +15,16 @@
 #include "base/memory/ref_counted_memory.h"
 #include "base/no_destructor.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/timer/timer.h"
 #include "base/values.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/prism/prism_space_window_delegate.h"
 #include "chrome/browser/prism/prism_spaces_ui_constants.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_attributes_entry.h"
+#include "chrome/browser/profiles/profile_attributes_storage.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/devtools_agent_host_client.h"
 #include "content/public/browser/web_contents.h"
@@ -51,12 +57,25 @@ constexpr char kPageHtml[] = R"HTML(<!doctype html>
   [hidden] { display: none !important; }
   body { font-family: -apple-system, system-ui, sans-serif;
          background: var(--bg-3); color: var(--text-1);
-         margin: 0; padding: 22px 32px 88px; animation: page-in .25s ease; }
-  @keyframes page-in { from { opacity: 0; } }
-  @keyframes card-in { from { opacity: 0; transform: translateY(10px)
-                       scale(.97); } }
+         margin: 0; padding: 24px 60px 88px; }
+  /* recon §7 enter/exit motion (~0.5-0.7s ease-out/spring) */
+  @keyframes card-in-right { from { opacity: 0;
+                             transform: translateX(64px) scale(.98); } }
+  @keyframes fade-in { from { opacity: 0; } }
+  @keyframes thumb-pop { from { opacity: 0; transform: scale(.92); } }
+  .card.enter { animation: card-in-right .55s cubic-bezier(.2,.8,.25,1)
+                backwards; animation-delay: var(--d, 0ms); }
+  header.enter { animation: fade-in .4s ease .25s backwards; }
+  #hintBar.enter { animation: fade-in .4s ease .35s backwards; }
+  .thumb img.pop { animation: thumb-pop .3s cubic-bezier(.2,.9,.3,1.15)
+                   backwards; animation-delay: var(--d, 0ms); }
+  #fxOverlay { position: fixed; z-index: 100; pointer-events: none;
+               object-fit: cover; object-position: top; background: #101010; }
+  #wall.fx-hidden, header.fx-hidden, #hintBar.fx-hidden,
+  .fx-fade { visibility: hidden; }
+  .card.fx-self-hidden { opacity: 0; }
 
-  header { display: flex; align-items: center; margin-bottom: 22px; }
+  header { display: flex; align-items: center; height: 40px; }
   header .brand { display: inline-flex; align-items: center; gap: 8px;
                   color: var(--text-2); font-weight: 600; font-size: 14px; }
   header .side { flex: 1; }
@@ -83,13 +102,14 @@ constexpr char kPageHtml[] = R"HTML(<!doctype html>
   #captionMenu .sub { margin-left: auto; color: var(--text-3);
                       font-size: 11.5px; }
 
+  /* recon §7: card row starts ≈8% from the top; uniform cards, ~40px gaps */
   #wall { display: grid; grid-template-columns: repeat(auto-fill,
-          minmax(300px, 1fr)); gap: 18px; }
+          minmax(340px, 1fr)); gap: 40px;
+          margin-top: max(12px, calc(8vh - 64px)); }
   .card { background: var(--bg-1); border: 1px solid #ffffff0d;
           border-radius: 16px; overflow: hidden; cursor: pointer;
-          transition: border-color .15s, box-shadow .15s, transform .15s;
-          animation: card-in .28s cubic-bezier(.2,.9,.3,1.2) backwards;
-          animation-delay: calc(var(--i, 0) * 45ms); }
+          transition: border-color .15s, box-shadow .15s, transform .15s,
+                      opacity .3s; }
   .card:hover { border-color: #ffffff26; transform: translateY(-2px); }
   /* recon §4: selected space gets a blue border */
   .card.focused { border-color: var(--accent);
@@ -99,15 +119,18 @@ constexpr char kPageHtml[] = R"HTML(<!doctype html>
   .thumb img { position: absolute; inset: 0; width: 100%; height: 100%;
                object-fit: cover; object-position: top; }
   .thumb .initial { font-size: 42px; font-weight: 700; color: #ffffff2e; }
-  /* recon §4: left-bottom "Space" label, right-bottom muted watermark */
-  .thumb .space-label { position: absolute; left: 10px; bottom: 10px;
-           font-size: 11.5px; font-weight: 600; color: var(--text-1);
-           background: #0000008c; border-radius: 999px; padding: 3px 10px;
-           backdrop-filter: blur(8px); }
-  .thumb .watermark { position: absolute; right: 10px; bottom: 10px;
-           display: inline-flex; align-items: center; gap: 5px;
-           color: var(--text-3); font-size: 11px; opacity: .8; }
-  .meta { padding: 12px 14px 14px; }
+  /* recon §7: under each card — left "Space" label (agent cards: blue
+     "Running" chip + task name), right the dynamic watermark */
+  .cardfoot { display: flex; align-items: center; justify-content: space-between;
+              gap: 10px; padding: 9px 4px 0; }
+  .foot-left { display: inline-flex; align-items: center; gap: 8px;
+               min-width: 0; overflow: hidden; }
+  .space-label { font-size: 11.5px; font-weight: 600; color: var(--text-2);
+                 white-space: nowrap; }
+  .foot-task { font-size: 11.5px; color: var(--text-2); white-space: nowrap;
+               overflow: hidden; text-overflow: ellipsis; }
+  .watermark { color: var(--text-3); font-size: 11px; white-space: nowrap; }
+  .meta { padding: 10px 14px 14px; }
   .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .name { font-size: 14.5px; font-weight: 600; }
   .chip { font-size: 11px; padding: 2px 8px; border-radius: 999px;
@@ -115,7 +138,8 @@ constexpr char kPageHtml[] = R"HTML(<!doctype html>
   .chip.agent { color: #8fd3a5; border-color: #2f5d43; }
   .chip.agentDelegatedToUser { color: #ffb86b; border-color: #6b4a2a; }
   .chip.focused { color: var(--accent); border-color: var(--accent); }
-  .chip.running { color: #8fd3a5; border-color: #2f5d43; }
+  /* recon §7: the agent "Running" chip is blue */
+  .chip.running { color: var(--accent); border-color: var(--accent); }
   .state { margin-top: 6px; color: var(--text-2); font-size: 12.5px;
            min-height: 15px; }
   .state:empty::before { content: "\2014"; color: var(--text-4); }
@@ -134,14 +158,14 @@ constexpr char kPageHtml[] = R"HTML(<!doctype html>
   .newspace .plus { font-size: 26px; color: var(--accent); }
   .empty { color: var(--text-3); }
 
-  /* recon §4: first-run ⌥S hint bar */
+  /* recon §4: first-run ⌥S hint bar (keyboard icon per recon §7) */
   #hintBar { position: fixed; left: 50%; bottom: 22px;
              transform: translateX(-50%); display: flex; align-items: center;
              gap: 12px; background: var(--fg-1); border: 1px solid #ffffff1a;
              border-radius: 999px; padding: 10px 12px 10px 18px;
              color: var(--text-2); font-size: 13px; z-index: 40;
-             box-shadow: 0 10px 34px #00000066;
-             animation: card-in .3s .3s cubic-bezier(.2,.9,.3,1.2) backwards; }
+             box-shadow: 0 10px 34px #00000066; }
+  #hintBar svg { flex: none; opacity: .8; }
   #hintBar kbd { color: var(--text-1); font-family: inherit; font-weight: 600; }
   #hintBar button { border-radius: 50%; padding: 3px 8px;
                     color: var(--text-3); }
@@ -159,12 +183,15 @@ constexpr char kPageHtml[] = R"HTML(<!doctype html>
 </header>
 <div id="wall"><div class="empty">Loading&hellip;</div></div>
 <div id="hintBar" hidden>
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="3" stroke="#ffffffb3" stroke-width="1.6"/><rect x="5" y="8.5" width="2.4" height="2.4" rx=".6" fill="#ffffffb3"/><rect x="9" y="8.5" width="2.4" height="2.4" rx=".6" fill="#ffffffb3"/><rect x="13" y="8.5" width="2.4" height="2.4" rx=".6" fill="#ffffffb3"/><rect x="17" y="8.5" width="2.4" height="2.4" rx=".6" fill="#ffffffb3"/><rect x="5" y="12.5" width="2.4" height="2.4" rx=".6" fill="#ffffffb3"/><rect x="9" y="12.5" width="8.4" height="2.4" rx=".6" fill="#ffffffb3"/><rect x="17" y="12.5" width="2.4" height="2.4" rx=".6" fill="#ffffffb3"/></svg>
   <span>Hold <kbd>&#x2325;</kbd> and press <kbd>S</kbd> repeatedly to quick-switch Spaces.</span>
   <button type="button" id="hintDismiss" aria-label="Dismiss hint">&#10005;</button>
 </div>
 <script src="app.js"></script></body></html>)HTML";
 
 constexpr char kAppJs[] = R"JS(let refreshCounter = 0;
+let entered = false;
+let exiting = false;
 function action(id, kind) {
   chrome.send("spaceAction", [id, kind]);
   setTimeout(refresh, 250);
@@ -222,6 +249,129 @@ document.getElementById("hintDismiss").addEventListener("click", () => {
   try { localStorage.setItem("prismSpacesHintDismissed", "1"); } catch (e) {}
 });
 
+// ---- recon §7 enter motion (~0.5-0.7s ease-out) ---------------------------
+// The live page content lifts slightly and scales down into its card slot
+// with a crossfade; the other cards stagger/slide in from the right; the
+// caption and the hint bar fade in; agent cards' live content pops in after
+// the transition settles.
+const header = document.querySelector("header");
+function revealEnter(focusedCard, overlayImg) {
+  header.classList.add("enter");
+  hintBar.classList.add("enter");
+  let d = 120;
+  let pop = 650;
+  for (const card of document.querySelectorAll("#wall .card")) {
+    if (card !== focusedCard) {
+      card.style.setProperty("--d", d + "ms");
+      card.classList.add("enter");
+      d += 55;
+    }
+    if (card.dataset.agent === "1") {
+      const img = card.querySelector(".thumb img");
+      if (img) {
+        img.style.setProperty("--d", pop + "ms");
+        img.classList.add("pop");
+        pop += 55;
+      }
+    }
+  }
+  if (focusedCard && overlayImg) runShrinkIn(focusedCard, overlayImg);
+  else if (focusedCard) focusedCard.classList.add("enter");
+}
+function runShrinkIn(card, overlayImg) {
+  const thumb = card.querySelector(".thumb");
+  const img = card.querySelector(".thumb img");
+  const rect = thumb.getBoundingClientRect();
+  const fx = document.createElement("img");
+  fx.id = "fxOverlay";
+  fx.src = overlayImg.src;
+  Object.assign(fx.style, { left: "0px", top: "0px",
+                            width: innerWidth + "px",
+                            height: innerHeight + "px" });
+  document.body.appendChild(fx);
+  const dx = rect.left + rect.width / 2 - innerWidth / 2;
+  const dy = rect.top + rect.height / 2 - innerHeight / 2;
+  const sx = rect.width / innerWidth;
+  const sy = rect.height / innerHeight;
+  const pos = `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`;
+  fx.animate([
+    { transform: "translateY(-16px) scale(1)", opacity: 1,
+      borderRadius: "0px" },
+    { transform: pos, opacity: 1, borderRadius: "16px", offset: 0.85 },
+    { transform: pos, opacity: 0, borderRadius: "16px" }
+  ], { duration: 600, easing: "cubic-bezier(.2,.8,.25,1)", fill: "forwards" })
+    .onfinish = () => { fx.remove(); card.classList.remove("fx-self-hidden"); };
+}
+function playEnter(data) {
+  const currentId = data.current || data.focused;
+  const focusedCard = document.querySelector(
+      `#wall .card[data-space="${currentId}"]`);
+  // Reveal the rest immediately (other cards stagger in, caption/hint fade);
+  // the focused card stays hidden until the shrink-in overlay lands in it —
+  // the overlay fetch doubles as the on-demand thumbnail, so it can trail
+  // the reveal (budget 900ms, then the card just slides in like the others).
+  if (focusedCard) focusedCard.classList.add("fx-self-hidden");
+  revealEnter(focusedCard, null);
+  const img = focusedCard && focusedCard.querySelector(".thumb img");
+  if (!img) return;
+  const pre = new Image();
+  let done = false;
+  const finish = (ok) => {
+    if (done || exiting) return;
+    done = true;
+    if (ok) {
+      runShrinkIn(focusedCard, pre);
+    } else {
+      focusedCard.classList.remove("fx-self-hidden");
+      focusedCard.classList.add("enter");
+    }
+  };
+  pre.onload = () => finish(true);
+  pre.onerror = () => finish(false);
+  pre.src = img.src;
+  setTimeout(() => finish(false), 900);
+}
+
+// ---- recon §7 exit motion: the clicked card scales back up into the page --
+function openSpace(card, id) {
+  if (exiting) { action(id, "focus"); return; }
+  exiting = true;
+  const thumb = card.querySelector(".thumb");
+  const img = card.querySelector(".thumb img");
+  for (const el of [header, hintBar, ...document.querySelectorAll("#wall .card")]) {
+    if (el !== card) {
+      el.style.transition = "opacity .3s ease";
+      el.style.opacity = "0";
+    }
+  }
+  if (img && thumb) {
+    const rect = thumb.getBoundingClientRect();
+    const fx = document.createElement("img");
+    fx.id = "fxOverlay";
+    fx.src = img.src;
+    Object.assign(fx.style, { left: rect.left + "px", top: rect.top + "px",
+                              width: rect.width + "px",
+                              height: rect.height + "px",
+                              borderRadius: "16px" });
+    document.body.appendChild(fx);
+    const dx = innerWidth / 2 - (rect.left + rect.width / 2);
+    const dy = innerHeight / 2 - (rect.top + rect.height / 2) + 12;
+    const sx = innerWidth / rect.width;
+    const sy = innerHeight / rect.height;
+    const pos = `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`;
+    fx.animate([
+      { transform: "translate(0px, 0px) scale(1)", opacity: 1,
+        borderRadius: "16px" },
+      { transform: pos, opacity: 1, borderRadius: "0px", offset: 0.85 },
+      { transform: pos, opacity: 0, borderRadius: "0px" }
+    ], { duration: 550, easing: "cubic-bezier(.2,.8,.25,1)", fill: "forwards" })
+      .onfinish = () => fx.remove();
+  }
+  // Fire the focus action as the expansion crosses the fullscreen point; the
+  // native tab-set swap lands under the crossfade.
+  setTimeout(() => action(id, "focus"), 380);
+}
+
 function onData(payloadJson) {
   const data = JSON.parse(payloadJson);
   const spaces = data.spaces || [];
@@ -231,13 +381,12 @@ function onData(payloadJson) {
 
   const wall = document.getElementById("wall");
   wall.replaceChildren();
-  let i = 0;
   for (const space of spaces) {
     const card = document.createElement("div");
     card.className = "card" + (space.id === data.focused ? " focused" : "");
-    card.style.setProperty("--i", i++);
     card.dataset.space = space.id;
-    card.addEventListener("click", () => action(space.id, "focus"));
+    if (space.ownership === "agent") card.dataset.agent = "1";
+    card.addEventListener("click", () => openSpace(card, space.id));
 
     const thumb = document.createElement("div");
     thumb.className = "thumb";
@@ -251,16 +400,22 @@ function onData(payloadJson) {
       img.alt = "";
       thumb.appendChild(img);
     }
-    // recon §4: left-bottom "Space" label + right-bottom muted watermark
-    const label = document.createElement("span");
-    label.className = "space-label";
-    label.textContent = "Space";
-    thumb.appendChild(label);
-    const wm = document.createElement("span");
-    wm.className = "watermark";
-    wm.textContent = "Your Prism";
-    thumb.appendChild(wm);
     card.appendChild(thumb);
+
+    // recon §7: under the card — left "Space" label (agent cards: blue
+    // "Running" chip + task name), right the dynamic watermark.
+    const foot = document.createElement("div");
+    foot.className = "cardfoot";
+    const left = document.createElement("span");
+    left.className = "foot-left";
+    span(left, "space-label", "Space");
+    if (space.ownership === "agent") {
+      span(left, "chip running", "Running");
+      span(left, "foot-task", space.name);
+    }
+    foot.appendChild(left);
+    span(foot, "watermark", data.watermark || "Your Prism");
+    card.appendChild(foot);
 
     const meta = document.createElement("div");
     meta.className = "meta";
@@ -270,8 +425,6 @@ function onData(payloadJson) {
     span(row, "chip " + space.ownership, ownershipLabel(space));
     if (space.id === data.focused) span(row, "chip focused", "Focused");
     if (space.windowShown) span(row, "chip", "Window open");
-    if (space.ownership === "agent" && space.agentTaskState)
-      span(row, "chip running", "Running");
     meta.appendChild(row);
     const state = document.createElement("div");
     state.className = "state";
@@ -302,7 +455,6 @@ function onData(payloadJson) {
 
   const add = document.createElement("div");
   add.className = "card newspace";
-  add.style.setProperty("--i", i);
   const plus = document.createElement("span");
   plus.className = "plus";
   plus.textContent = "+";
@@ -310,6 +462,11 @@ function onData(payloadJson) {
   add.appendChild(document.createTextNode(" Create a new Space"));
   add.addEventListener("click", () => action(0, "create"));
   wall.appendChild(add);
+
+  if (!entered) {
+    entered = true;
+    playEnter(data);
+  }
 }
 document.getElementById("deleteAll").addEventListener("click", () => {
   action(0, "deleteAll");
@@ -477,10 +634,29 @@ void ServeThumbnail(const std::string& path,
   job->Run();
 }
 
-std::string SpacesJson() {
+// recon §7: the under-card watermark is "<account/display name> Agents
+// Prism", with "Your Prism" as the signed-out fallback.
+std::string Watermark(content::WebUI* web_ui) {
+  std::string name;
+  auto* profile =
+      Profile::FromBrowserContext(web_ui->GetWebContents()->GetBrowserContext());
+  if (profile && g_browser_process && g_browser_process->profile_manager()) {
+    auto& storage =
+        g_browser_process->profile_manager()->GetProfileAttributesStorage();
+    if (const ProfileAttributesEntry* entry =
+            storage.GetProfileAttributesWithPath(profile->GetPath())) {
+      name = base::UTF16ToUTF8(entry->GetGAIAName());
+    }
+  }
+  return name.empty() ? "Your Prism" : name + " Agents Prism";
+}
+
+std::string SpacesJson(const std::string& watermark, int current_space_id) {
   auto* manager = SpaceManager::GetInstance();
   base::DictValue root;
   root.Set("focused", manager->focused_space_id());
+  root.Set("current", current_space_id);
+  root.Set("watermark", watermark);
   base::ListValue spaces;
   for (const auto& space : manager->List()) {
     base::DictValue entry;
@@ -582,7 +758,12 @@ void PrismSpacesUI::OnQuerySpaces(const base::ListValue& args) {
   // lifecycle concern behind CallJavascriptFunctionUnsafe's name does not
   // apply beyond startup — the page only queries after it is interactive.
   web_ui()->CallJavascriptFunctionUnsafe("prismSpaces.onData",
-                                         base::ValueView(SpacesJson()));
+                                         base::ValueView(SpacesJson(
+          Watermark(web_ui()),
+          GetPrismSpaceWindowDelegate()
+              ? GetPrismSpaceWindowDelegate()->SpaceIdForWebContents(
+                    web_ui()->GetWebContents())
+              : 0)));
 }
 
 void PrismSpacesUI::OnAction(const base::ListValue& args) {
@@ -619,7 +800,12 @@ void PrismSpacesUI::OnAction(const base::ListValue& args) {
 
   // Push the mutated state immediately instead of waiting for the poll.
   web_ui()->CallJavascriptFunctionUnsafe("prismSpaces.onData",
-                                         base::ValueView(SpacesJson()));
+                                         base::ValueView(SpacesJson(
+          Watermark(web_ui()),
+          GetPrismSpaceWindowDelegate()
+              ? GetPrismSpaceWindowDelegate()->SpaceIdForWebContents(
+                    web_ui()->GetWebContents())
+              : 0)));
 }
 
 }  // namespace prism

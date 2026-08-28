@@ -101,3 +101,10 @@ backdrop dim, hint bar) is the gap.
 - Strings: "ego (lite)" → "Prism", "ego://welcome" → "prism://welcome" (keep our existing chrome://prism-welcome alias), "/ego-browser" → "/prism-browser", `npx skills add citrolabs/ego-lite` → our skill install command.
 - Kulim Park is OFL-licensed — safe to bundle as-is for the onboarding display font.
 - Keep ego asset files only under `chromium/reference/` for parity checks; the shipped WebUI uses Prism-branded copies.
+
+## 7. Follow-up recon (2026-08-28, from user's ego recordings/screenshots)
+
+- **Spaces/dashboard trigger lives on the TAB STRIP row**, window top-right corner (AX: 30×30, "Open Space (⌥S)"), NOT on the toolbar row next to the avatar. When 0 agents run it shows a four-squares grid icon; when >0 it renders as a dark circle with a white numeral (the running-agents count badge). The toolbar-row avatar button is a separate agent/profile menu and carries NO badge.
+- **Watermark is dynamic**: fresh profile shows "Your ego"; the user's signed-in machine shows "LogiBricks.AI Agents EGO" — i.e. `<account/display name> Agents EGO` with a "Your ego" fallback. Prism equivalent: `<display name> Agents Prism`, fallback "Your Prism".
+- **Dashboard layout (1920×1080 reference)**: cards sit near the top (row starts ≈8% from top), uniform card size, ~40px gaps; selected/current space card has a blue border, others thin gray; under each card: left = "Space" label (agent cards: blue "Running" chip + task name), right = watermark; top center "N Spaces ⌄" dropdown; trailing "+" dashed card; bottom-center hint bar with keyboard icon ("Hold ⌥ and press S repeatedly to quick-switch Spaces."); corner badge stays visible while in dashboard; window traffic lights visible top-left.
+- **Open/close animation (~0.5–0.7s, ease-out/spring)**: on trigger, the live page content lifts slightly (translateY) and scales down into its card slot with a crossfade; the other cards stagger/slide in from the right; the "N Spaces ⌄" caption and the hint bar fade in. The agent space card's live content pops in right after the transition settles. Reverse animation when a card is clicked to open that space.

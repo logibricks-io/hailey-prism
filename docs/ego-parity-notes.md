@@ -192,11 +192,13 @@ Kulim Park (OFL) bundled for display type.
   click opens the agent menu. (ego's chip measures 85×22; ours is pinned to
   the same 22 DIP height, width to content — ~70×22 for the shorter label.)
 - Toolbar button: 32×32 DIP hit target with the mark drawn at 16 DIP
-  centered (Chromium `kDefaultIconSize` convention) + an ~11 DIP dark
-  circular badge (9px white numeral, glyph's bottom-right) counting
-  agent-controlled spaces (hidden at 0). The badge is composited into the
-  icon image (`Button::OnPaint` is final at this pin); 1 s `SpaceManager`
-  poll, same source and cadence as the Dock badge.
+  centered (Chromium `kDefaultIconSize` convention). Per recon §7 the
+  toolbar-row button carries NO badge; the running-agents count moved to
+  the spaces trigger (next bullet).
+- Spaces trigger (recon §7): 30×30 DIP button pinned to the TAB STRIP row's
+  top-right corner ("Open Space (⌥S)", patch 0019). 0 agents → four-squares
+  grid icon; >0 → dark count circle + white numeral (1 s SpaceManager poll,
+  the Dock badge's cadence). Click opens the spaces overview (= ⌥S).
 - Tab leading icon: `chrome://prism-welcome` and `chrome://prism-onboarding`
   tabs carry the brand mark via a data-URI `<link rel=icon>` at standard
   favicon geometry (the tile fills the central 75% of the 16 DIP box).
@@ -204,9 +206,41 @@ Kulim Park (OFL) bundled for display type.
   favicon themification otherwise masks the tile into a gray silhouette.
 - **Not done**: agent-driven tabs get no favicon override (would require
   hooking the favicon driver; agent presence is already signaled by the
-  in-window banner, the toolbar badge, and the Dock badge).
+  in-window banner, the corner count badge, and the Dock badge).
 - Verified silently (offscreen throwaway profile, window-scoped captures,
-  live agent space for the badge): `docs/assets/brand-elements-*.png`.
+  live agent space for the badges): `docs/assets/brand-elements-*.png`,
+  `docs/assets/spaces-*.png`.
+
+## C2. Spaces dashboard + motion (recon §7)
+
+- Trigger placement per §7 (tab-strip corner, see §C). The overview itself
+  stays tab-hosted (`chrome://prism-spaces`), so window traffic lights and
+  the corner trigger/badge remain visible inside it.
+- Layout now matches the recon: card row starts ≈8% from the top, uniform
+  cards (`minmax(340px, 1fr)`), 40 px gaps, blue border on the focused
+  card, thin gray otherwise; under each card left = "Space" label (agent
+  cards add a blue "Running" chip + task name), right = dynamic watermark
+  `<account/display name> Agents Prism` from the profile's GAIA name with
+  "Your Prism" fallback; top-center "N Spaces ⌄"; trailing "+" dashed card;
+  bottom-center ⌥S hint bar with a keyboard icon.
+- Enter/exit motion (WebUI, ~0.55–0.6 s ease-out): on open, the current
+  space card's fresh capture starts fullscreen, lifts slightly (translateY)
+  and scales down into its card slot with a crossfade; the other cards
+  stagger/slide in from the right; caption + hint bar fade in; agent card
+  thumbnails pop in after settle. Card click runs the reverse expansion,
+  then fires the focus action mid-crossfade. "Current" is derived from the
+  window hosting the dashboard tab (`SpaceIdForWebContents`); the focused
+  highlight keeps the manager's focus id (probe semantics).
+- **Residual deltas**: (1) the implicit default space has no card, so
+  opening the dashboard from default-space browsing plays no shrink-in
+  overlay (nothing to scale into); (2) the overlay's fullscreen start lags
+  the open by the on-demand thumbnail fetch (budgeted 900 ms, then the card
+  just slides in) — a native mission-control overlay would start instantly;
+  (3) the dashboard tab stays open after focusing a space (ego's overlay
+  dismisses itself); (4) stagger distance/lift and the spring curve are
+  approximations from the recording, not measured keyframes.
+- Verified silently: enter frames `docs/assets/spaces-enter-animation.png`
+  → settled `spaces-dashboard.png`; exit frame `spaces-exit-animation.png`.
 
 ## D. Spaces overview (`chrome://prism-spaces`)
 

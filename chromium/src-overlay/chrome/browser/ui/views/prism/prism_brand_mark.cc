@@ -5,12 +5,7 @@
 
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/geometry/skia_conversions.h"
-#include "ui/gfx/font_list.h"
 #include "ui/gfx/image/image_skia_rep.h"
-
-#include <string>
-
-#include "base/strings/utf_string_conversions.h"
 
 namespace prism {
 
@@ -48,7 +43,7 @@ gfx::ImageSkia CreateLogiBricksMarkImage(int size_px, SkColor brick_color) {
   return image;
 }
 
-gfx::ImageSkia CreateToolbarButtonIcon(SkColor brick_color, int agent_count) {
+gfx::ImageSkia CreateToolbarButtonIcon(SkColor brick_color) {
   gfx::ImageSkia image;
   for (float scale : {1.0f, 2.0f, 3.0f}) {
     gfx::Canvas canvas(gfx::Size(kToolbarButtonImageSize,
@@ -61,27 +56,6 @@ gfx::ImageSkia CreateToolbarButtonIcon(SkColor brick_color, int agent_count) {
                                    kToolbarButtonGlyphSize,
                                    kToolbarButtonGlyphSize),
                         brick_color);
-    if (agent_count >= 1) {
-      // Center one radius in from the image's bottom-right corner so the
-      // circle straddles the glyph's bottom-right corner without clipping.
-      const gfx::PointF center(kToolbarButtonImageSize - kBadgeRadius,
-                               kToolbarButtonImageSize - kBadgeRadius);
-      cc::PaintFlags flags;
-      flags.setAntiAlias(true);
-      flags.setColor(SkColorSetRGB(0x1f, 0x1f, 0x1f));
-      canvas.DrawCircle(center, kBadgeRadius, flags);
-      const std::u16string numeral =
-          base::UTF8ToUTF16(std::to_string(agent_count));
-      const int text_h = static_cast<int>(kBadgeRadius * 2);
-      canvas.DrawStringRectWithFlags(
-          numeral,
-          gfx::FontList().DeriveWithSizeDelta(-3),  // 12px -> 9px
-          SK_ColorWHITE,
-          gfx::Rect(static_cast<int>(center.x() - kBadgeRadius),
-                    static_cast<int>(center.y() - text_h / 2.f),
-                    static_cast<int>(kBadgeRadius * 2), text_h),
-          gfx::Canvas::TEXT_ALIGN_CENTER);
-    }
     image.AddRepresentation(
         gfx::ImageSkiaRep(canvas.GetBitmap(), scale));
   }

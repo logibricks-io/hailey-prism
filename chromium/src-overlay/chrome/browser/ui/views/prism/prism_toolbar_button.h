@@ -7,7 +7,6 @@
 #include <memory>
 
 #include "base/memory/raw_ptr.h"
-#include "base/timer/timer.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_button.h"
 
 class Browser;
@@ -16,9 +15,10 @@ namespace prism {
 
 class PrismAgentMenu;
 
-// Top-right Prism button (recon §5): LogiBricks mark with a dark circular
-// badge counting agent-controlled spaces (hidden at 0, same source as the
-// Dock badge's 1s sync). Click opens the agent menu.
+// Top-right Prism button (recon §5): the LogiBricks mark opening the agent
+// menu. Per recon §7 this toolbar-row button carries NO badge — the
+// running-agents count lives on the tab-strip corner trigger
+// (PrismSpacesButton).
 class PrismToolbarButton : public ToolbarButton {
   METADATA_HEADER(PrismToolbarButton, ToolbarButton)
 
@@ -31,11 +31,8 @@ class PrismToolbarButton : public ToolbarButton {
 
  private:
   void RefreshIcon();
-  void SyncBadge();
 
   raw_ptr<Browser> browser_;
-  int agent_count_ = 0;
-  base::RepeatingTimer badge_timer_;
   std::unique_ptr<PrismAgentMenu> menu_;
 };
 

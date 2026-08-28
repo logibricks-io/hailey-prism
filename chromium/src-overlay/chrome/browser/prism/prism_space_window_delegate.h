@@ -50,6 +50,13 @@ class PrismSpaceWindowDelegate : public SpaceWindowDelegate {
   // Phase 5: user-facing space switching (View menu items / keyboard).
   // Opens chrome://prism-spaces in a new foreground tab of `browser`.
   void OpenSpacesOverview(Browser* browser);
+  // Same, for callers that only hold a BrowserWindowInterface (e.g. the
+  // tab-strip corner trigger, recon §7).
+  void OpenSpacesOverview(BrowserWindowInterface* browser);
+  // The space whose window currently hosts `wc` in its tab strip, or 0 when
+  // it lives in the implicit default space's window (or no tracked window).
+  // Used by the dashboard to know which card is "current" (recon §7).
+  int SpaceIdForWebContents(content::WebContents* wc);
   // Raises the window hosting `space_id` (Show + Activate). No-op when the
   // space has no tracked window. Used by the toolbar/omnibox agent menu.
   void FocusSpaceWindow(int space_id);

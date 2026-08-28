@@ -209,6 +209,36 @@ void PrismSpaceWindowDelegate::OpenSpacesOverview(Browser* browser) {
   browser->OpenURL(params, /*navigation_handle_callback=*/{});
 }
 
+void PrismSpaceWindowDelegate::OpenSpacesOverview(
+    BrowserWindowInterface* browser) {
+  if (!browser) {
+    return;
+  }
+  content::OpenURLParams params(GURL(kPrismSpacesURL), content::Referrer(),
+                                WindowOpenDisposition::NEW_FOREGROUND_TAB,
+                                ui::PAGE_TRANSITION_AUTO_BOOKMARK, false);
+  browser->OpenURL(params, /*navigation_handle_callback=*/{});
+}
+
+int PrismSpaceWindowDelegate::SpaceIdForWebContents(content::WebContents* wc) {
+  if (!wc) {
+    return 0;
+  }
+  for (const auto& [space_id, unused] : windows_) {
+    BrowserWindowInterface* window = FindSpaceWindow(space_id);
+    if (!window) {
+      continue;
+    }
+    auto* tabs = window->GetTabStripModel();
+    for (int i = 0; i < tabs->count(); ++i) {
+      if (tabs->GetWebContentsAt(i) == wc) {
+        return space_id;
+      }
+    }
+  }
+  return 0;
+}
+
 void PrismSpaceWindowDelegate::FocusSpaceWindow(int space_id) {
   BrowserWindowInterface* window = FindSpaceWindow(space_id);
   if (!window) {

@@ -4,15 +4,10 @@
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "chrome/browser/ui/views/prism/prism_toolbar_button.h"
 
-#include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/color/chrome_color_id.h"
 #include "chrome/browser/ui/views/prism/prism_agent_menu.h"
 #include "chrome/browser/ui/views/prism/prism_brand_mark.h"
-#include "prism/browser/spaces/space_manager.h"
 #include "ui/color/color_provider.h"
-#include "ui/gfx/canvas.h"
-#include "ui/gfx/geometry/point_f.h"
 #include "ui/gfx/image/image_skia.h"
 
 namespace prism {
@@ -31,12 +26,6 @@ PrismToolbarButton::PrismToolbarButton(Browser* browser)
       browser_(browser) {
   SetAccessibleName(u"Prism");
   SetTooltipText(u"Prism — agent activity");
-  // Same 1s cadence as the Dock badge's SyncAgentSurfaces.
-  SyncBadge();
-  badge_timer_.Start(
-      FROM_HERE, base::Seconds(1),
-      base::BindRepeating(&PrismToolbarButton::SyncBadge,
-                          base::Unretained(this)));
 }
 
 PrismToolbarButton::~PrismToolbarButton() = default;
@@ -53,26 +42,9 @@ void PrismToolbarButton::RefreshIcon() {
   }
   const SkColor ink = provider->GetColor(kColorToolbarButtonIcon);
   // 16 DIP glyph in an 18 DIP image: with the standard TOOLBAR_BUTTON insets
-  // (7 DIP) the hit target lands at 32x32 DIP. The badge is composited into
-  // the icon (Button::OnPaint is final): it tracks the icon across themes
-  // and sizes. Hidden entirely at 0 agents.
+  // (7 DIP) the hit target lands at 32x32 DIP. No badge here (recon §7).
   SetImageModel(ButtonState::STATE_NORMAL,
-                ui::ImageModel::FromImageSkia(
-                    CreateToolbarButtonIcon(ink, agent_count_)));
-}
-
-void PrismToolbarButton::SyncBadge() {
-  int count = 0;
-  for (const auto& space : SpaceManager::GetInstance()->List()) {
-    if (space.ownership == SpaceManager::Ownership::kAgent) {
-      ++count;
-    }
-  }
-  if (count == agent_count_) {
-    return;
-  }
-  agent_count_ = count;
-  RefreshIcon();
+                ui::ImageModel::FromImageSkia(CreateToolbarButtonIcon(ink)));
 }
 
 BEGIN_METADATA(PrismToolbarButton)

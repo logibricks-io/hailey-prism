@@ -1,0 +1,87 @@
+Subject: [PATCH 0019] Prism: spaces dashboard trigger on the tab strip row
+
+Recon §7: ego's spaces trigger lives on the TAB STRIP row, pinned to the
+window's top-right corner (30x30 DIP, "Open Space (⌥S)"), not on the
+toolbar row. Adds PrismSpacesButton (overlay) to
+HorizontalTabStripRegionView, after the grab-handle space so it stays at
+the corner; click runs the same action as ⌥S / IDC_PRISM_SPACES_OVERVIEW.
+The button shows a four-squares grid at 0 running agents and a dark
+count circle at >0 (1s SpaceManager poll, the Dock badge's cadence).
+
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+index 05c9251..1ee53fd 100644
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -1454,6 +1454,8 @@ static_library("ui") {
+       "//chrome/browser/ui/views/prism/prism_brand_chip_view.h",
+       "//chrome/browser/ui/views/prism/prism_brand_mark.cc",
+       "//chrome/browser/ui/views/prism/prism_brand_mark.h",
++      "//chrome/browser/ui/views/prism/prism_spaces_button.cc",
++      "//chrome/browser/ui/views/prism/prism_spaces_button.h",
+       "//chrome/browser/ui/views/prism/prism_toolbar_button.cc",
+       "//chrome/browser/ui/views/prism/prism_toolbar_button.h",
+       "browser_tab_restorer.cc",
+diff --git a/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc
+index 7c991f9d61..60d924ac1a 100644
+--- a/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc
+@@ -27,6 +27,7 @@
+ #include "chrome/browser/ui/ui_features.h"
+ #include "chrome/browser/ui/views/chrome_layout_provider.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
++#include "chrome/browser/ui/views/prism/prism_spaces_button.h"
+ #include "chrome/browser/ui/views/tab_search_bubble_host.h"
+ #include "chrome/browser/ui/views/tabs/browser_tab_strip_controller.h"
+ #include "chrome/browser/ui/views/tabs/dragging/tab_drag_controller.h"
+@@ -268,6 +269,16 @@ HorizontalTabStripRegionView::HorizontalTabStripRegionView(
+                                views::MaximumFlexSizeRule::kUnbounded)
+           .WithOrder(3));
+ 
++  // Prism: spaces dashboard trigger pinned to the top-right corner of the
++  // tab strip row (recon §7); click runs the same action as ⌥S.
++  if (browser &&
++      (browser->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL)) {
++    prism_spaces_button_ = AddChildView(
++        std::make_unique<prism::PrismSpacesButton>(browser));
++    prism_spaces_button_->SetProperty(views::kCrossAxisAlignmentKey,
++                                      views::LayoutAlignment::kCenter);
++  }
++
+   SetProperty(views::kElementIdentifierKey, kTabStripRegionElementId);
+ 
+   if (tab_strip_action_container) {
+@@ -353,6 +364,10 @@ views::View::Views HorizontalTabStripRegionView::GetChildrenInZOrder() {
+     children.emplace_back(tab_strip_action_container_.get());
+   }
+ 
++  if (prism_spaces_button_) {
++    children.emplace_back(prism_spaces_button_.get());
++  }
++
+   if (reserved_grab_handle_space_) {
+     children.emplace_back(reserved_grab_handle_space_.get());
+   }
+diff --git a/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.h b/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.h
+index 774e58392e..8e527e96e3 100644
+--- a/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.h
++++ b/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.h
+@@ -24,6 +24,10 @@ class Button;
+ class LabelButton;
+ }
+ class NewTabButton;
++
++namespace prism {
++class PrismSpacesButton;
++}  // namespace prism
+ class TabStripActionContainer;
+ class TabSearchButton;
+ class TabStripComboButton;
+@@ -136,6 +140,8 @@ class HorizontalTabStripRegionView final : public TabStripRegionView {
+   raw_ptr<TabStripScrollContainer> tab_strip_scroll_container_ = nullptr;
+   raw_ptr<TabStripComboButton> combo_button_ = nullptr;
+   raw_ptr<views::Button> new_tab_button_ = nullptr;
++  // Prism: spaces dashboard trigger at the top-right corner (recon §7).
++  raw_ptr<prism::PrismSpacesButton> prism_spaces_button_ = nullptr;
+   raw_ptr<TabStripControlButton> unfocus_button_ = nullptr;
+ 
+   std::unique_ptr<views::ActionViewController> action_view_controller_;
