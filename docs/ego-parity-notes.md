@@ -189,20 +189,24 @@ Kulim Park (OFL) bundled for display type.
 ## C. Native brand chrome (recon §5)
 
 - Omnibox chip: LogiBricks mark + "Prism" pill, leftmost leading decoration;
-  click opens the agent menu. (ego's chip measures 85×22; ours sizes to
-  content, ~64×22.)
-- Toolbar button: top-right mark + dark circular badge counting
+  click opens the agent menu. (ego's chip measures 85×22; ours is pinned to
+  the same 22 DIP height, width to content — ~70×22 for the shorter label.)
+- Toolbar button: 32×32 DIP hit target with the mark drawn at 16 DIP
+  centered (Chromium `kDefaultIconSize` convention) + an ~11 DIP dark
+  circular badge (9px white numeral, glyph's bottom-right) counting
   agent-controlled spaces (hidden at 0). The badge is composited into the
   icon image (`Button::OnPaint` is final at this pin); 1 s `SpaceManager`
   poll, same source and cadence as the Dock badge.
 - Tab leading icon: `chrome://prism-welcome` and `chrome://prism-onboarding`
-  tabs carry the brand mark via a data-URI `<link rel=icon>`.
+  tabs carry the brand mark via a data-URI `<link rel=icon>` at standard
+  favicon geometry (the tile fills the central 75% of the 16 DIP box).
+  Patch 0018 keeps the two-tone colors: with padding, Chromium's WebUI
+  favicon themification otherwise masks the tile into a gray silhouette.
 - **Not done**: agent-driven tabs get no favicon override (would require
   hooking the favicon driver; agent presence is already signaled by the
   in-window banner, the toolbar badge, and the Dock badge).
-- **Not visually verified**: the badge at count > 0 (needs a live agent
-  space mid-screenshot). Count source is the Dock badge's; the composite
-  drawing is deterministic.
+- Verified silently (offscreen throwaway profile, window-scoped captures,
+  live agent space for the badge): `docs/assets/brand-elements-*.png`.
 
 ## D. Spaces overview (`chrome://prism-spaces`)
 
