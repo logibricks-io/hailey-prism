@@ -36,45 +36,52 @@ void PaintLogiBricksMark(gfx::Canvas* canvas,
   canvas->DrawCircle(gfx::PointF(ox + 497 * s, oy + 79 * s), 71 * s, flags);
 }
 
-gfx::ImageSkia CreateLogiBricksMarkImageWithBadge(int size_px,
-                                                  SkColor brick_color,
-                                                  int count) {
+gfx::ImageSkia CreateLogiBricksMarkImage(int size_px, SkColor brick_color) {
   gfx::ImageSkia image;
-  for (float scale : {1.0f, 2.0f}) {
+  for (float scale : {1.0f, 2.0f, 3.0f}) {
     gfx::Canvas canvas(gfx::Size(size_px, size_px), scale,
                        /*is_opaque=*/false);
     PaintLogiBricksMark(&canvas, gfx::RectF(size_px, size_px), brick_color);
-    const float r = size_px * 0.33f;
-    const gfx::PointF center(size_px - r * 0.9f, size_px - r * 0.9f);
-    cc::PaintFlags flags;
-    flags.setAntiAlias(true);
-    flags.setColor(SkColorSetRGB(0x1f, 0x1f, 0x1f));
-    canvas.DrawCircle(center, r, flags);
-    flags.setColor(SK_ColorWHITE);
-    const std::u16string numeral =
-        base::UTF8ToUTF16(std::to_string(count));
-    const int text_h = static_cast<int>(r * 1.25f);
-    canvas.DrawStringRectWithFlags(
-        numeral,
-        gfx::FontList().DeriveWithSizeDelta(
-            static_cast<int>(-4 * scale)),
-        SK_ColorWHITE,
-        gfx::Rect(static_cast<int>(center.x() - r),
-                  static_cast<int>(center.y() - text_h / 2.f),
-                  static_cast<int>(r * 2), text_h),
-        gfx::Canvas::TEXT_ALIGN_CENTER);
     image.AddRepresentation(
         gfx::ImageSkiaRep(canvas.GetBitmap(), scale));
   }
   return image;
 }
 
-gfx::ImageSkia CreateLogiBricksMarkImage(int size_px, SkColor brick_color) {
+gfx::ImageSkia CreateToolbarButtonIcon(SkColor brick_color, int agent_count) {
   gfx::ImageSkia image;
-  for (float scale : {1.0f, 2.0f}) {
-    gfx::Canvas canvas(gfx::Size(size_px, size_px), scale,
-                       /*is_opaque=*/false);
-    PaintLogiBricksMark(&canvas, gfx::RectF(size_px, size_px), brick_color);
+  for (float scale : {1.0f, 2.0f, 3.0f}) {
+    gfx::Canvas canvas(gfx::Size(kToolbarButtonImageSize,
+                                 kToolbarButtonImageSize),
+                       scale, /*is_opaque=*/false);
+    const float glyph_origin =
+        (kToolbarButtonImageSize - kToolbarButtonGlyphSize) / 2.f;
+    PaintLogiBricksMark(&canvas,
+                        gfx::RectF(glyph_origin, glyph_origin,
+                                   kToolbarButtonGlyphSize,
+                                   kToolbarButtonGlyphSize),
+                        brick_color);
+    if (agent_count >= 1) {
+      // Center one radius in from the image's bottom-right corner so the
+      // circle straddles the glyph's bottom-right corner without clipping.
+      const gfx::PointF center(kToolbarButtonImageSize - kBadgeRadius,
+                               kToolbarButtonImageSize - kBadgeRadius);
+      cc::PaintFlags flags;
+      flags.setAntiAlias(true);
+      flags.setColor(SkColorSetRGB(0x1f, 0x1f, 0x1f));
+      canvas.DrawCircle(center, kBadgeRadius, flags);
+      const std::u16string numeral =
+          base::UTF8ToUTF16(std::to_string(agent_count));
+      const int text_h = static_cast<int>(kBadgeRadius * 2);
+      canvas.DrawStringRectWithFlags(
+          numeral,
+          gfx::FontList().DeriveWithSizeDelta(-3),  // 12px -> 9px
+          SK_ColorWHITE,
+          gfx::Rect(static_cast<int>(center.x() - kBadgeRadius),
+                    static_cast<int>(center.y() - text_h / 2.f),
+                    static_cast<int>(kBadgeRadius * 2), text_h),
+          gfx::Canvas::TEXT_ALIGN_CENTER);
+    }
     image.AddRepresentation(
         gfx::ImageSkiaRep(canvas.GetBitmap(), scale));
   }

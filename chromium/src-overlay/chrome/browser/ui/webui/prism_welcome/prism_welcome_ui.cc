@@ -59,11 +59,15 @@ namespace {
 // Branding swaps per recon §6: LogiBricks mark, "Prism" strings,
 // /prism-browser prompt, no telemetry. Static markup + an external app.js
 // (WebUI CSP: no inline scripts, no runtime innerHTML — Trusted Types).
+// The tab favicon below uses standard favicon geometry: Chromium paints
+// favicons at gfx::kFaviconSize (16 DIP), and the dark tile fills only the
+// central 75% of that box (12.5% padding per side), the mark inside keeping
+// the generate_icons.py in-tile ratio.
 constexpr char kPageHtml[] = R"HTML(<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Welcome to Prism</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%20576%20576%27%3E%3Crect%20width%3D%27576%27%20height%3D%27576%27%20rx%3D%27120%27%20fill%3D%27%23181818%27/%3E%3Cg%20transform%3D%27translate%2840%2040%29%20scale%280.862%29%27%3E%3Crect%20x%3D%270%27%20y%3D%270%27%20width%3D%27158%27%20height%3D%27158%27%20rx%3D%2721%27%20fill%3D%27%23FBFBF9%27/%3E%3Crect%20x%3D%270%27%20y%3D%27209%27%20width%3D%27158%27%20height%3D%27158%27%20rx%3D%2721%27%20fill%3D%27%23FBFBF9%27/%3E%3Crect%20x%3D%270%27%20y%3D%27418%27%20width%3D%27158%27%20height%3D%27158%27%20rx%3D%2721%27%20fill%3D%27%23FBFBF9%27/%3E%3Crect%20x%3D%27209%27%20y%3D%27418%27%20width%3D%27158%27%20height%3D%27158%27%20rx%3D%2721%27%20fill%3D%27%23FBFBF9%27/%3E%3Crect%20x%3D%27418%27%20y%3D%27418%27%20width%3D%27158%27%20height%3D%27158%27%20rx%3D%2721%27%20fill%3D%27%23FBFBF9%27/%3E%3Ccircle%20cx%3D%27497%27%20cy%3D%2779%27%20r%3D%2771%27%20fill%3D%27%23C87858%27/%3E%3C/g%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%20576%20576%27%3E%3Crect%20x%3D%2772%27%20y%3D%2772%27%20width%3D%27432%27%20height%3D%27432%27%20rx%3D%2790%27%20fill%3D%27%23181818%27/%3E%3Cg%20transform%3D%27translate%28102%20102%29%20scale%280.6465%29%27%3E%3Crect%20x%3D%270%27%20y%3D%270%27%20width%3D%27158%27%20height%3D%27158%27%20rx%3D%2721%27%20fill%3D%27%23FBFBF9%27/%3E%3Crect%20x%3D%270%27%20y%3D%27209%27%20width%3D%27158%27%20height%3D%27158%27%20rx%3D%2721%27%20fill%3D%27%23FBFBF9%27/%3E%3Crect%20x%3D%270%27%20y%3D%27418%27%20width%3D%27158%27%20height%3D%27158%27%20rx%3D%2721%27%20fill%3D%27%23FBFBF9%27/%3E%3Crect%20x%3D%27209%27%20y%3D%27418%27%20width%3D%27158%27%20height%3D%27158%27%20rx%3D%2721%27%20fill%3D%27%23FBFBF9%27/%3E%3Crect%20x%3D%27418%27%20y%3D%27418%27%20width%3D%27158%27%20height%3D%27158%27%20rx%3D%2721%27%20fill%3D%27%23FBFBF9%27/%3E%3Ccircle%20cx%3D%27497%27%20cy%3D%2779%27%20r%3D%2771%27%20fill%3D%27%23C87858%27/%3E%3C/g%3E%3C/svg%3E">
 <style>
   :root {
     --bg-1:#1f1f1f; --bg-3:#171717; --fg-1:#2e2e2e; --fg-3:#424242;

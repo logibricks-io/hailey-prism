@@ -52,14 +52,13 @@ void PrismToolbarButton::RefreshIcon() {
     return;
   }
   const SkColor ink = provider->GetColor(kColorToolbarButtonIcon);
-  // The badge is composited into the icon (Button::OnPaint is final): it
-  // tracks the icon across themes and sizes. Hidden entirely at 0 agents.
+  // 16 DIP glyph in an 18 DIP image: with the standard TOOLBAR_BUTTON insets
+  // (7 DIP) the hit target lands at 32x32 DIP. The badge is composited into
+  // the icon (Button::OnPaint is final): it tracks the icon across themes
+  // and sizes. Hidden entirely at 0 agents.
   SetImageModel(ButtonState::STATE_NORMAL,
                 ui::ImageModel::FromImageSkia(
-                    agent_count_ > 0
-                        ? CreateLogiBricksMarkImageWithBadge(20, ink,
-                                                             agent_count_)
-                        : CreateLogiBricksMarkImage(20, ink)));
+                    CreateToolbarButtonIcon(ink, agent_count_)));
 }
 
 void PrismToolbarButton::SyncBadge() {

@@ -1,0 +1,28 @@
+Subject: [PATCH 0018] Prism: keep brand favicon colors on Prism WebUI pages
+
+Chromium "themifies" favicons of chrome:// pages when their K-mean color
+lacks contrast against the tab strip: the bitmap is replaced by its alpha
+silhouette in the theme color. Once the LogiBricks favicon got standard
+favicon padding (transparent margins), its K-mean fell below the contrast
+threshold and the tab icon collapsed into a flat gray rounded square.
+
+Exclude chrome://prism-welcome and chrome://prism-onboarding from
+themification: the two-tone tile (dark tile, ivory bricks, terracotta dot)
+is designed to read on both light and dark tab strips as-is.
+
+diff --git a/chrome/browser/favicon/favicon_utils.cc b/chrome/browser/favicon/favicon_utils.cc
+index c674695868..dd2b919d7d 100644
+--- a/chrome/browser/favicon/favicon_utils.cc
++++ b/chrome/browser/favicon/favicon_utils.cc
+@@ -184,6 +184,11 @@ bool ShouldThemifyFavicon(GURL url) {
+   if (!url.SchemeIs(content::kChromeUIScheme)) {
+     return false;
+   }
++  // Prism: the brand favicons on our WebUI pages keep their real colors —
++  // the two-tone LogiBricks tile reads on light and dark tab strips as-is.
++  if (url.host() == "prism-welcome" || url.host() == "prism-onboarding") {
++    return false;
++  }
+   return url.host() != chrome::kChromeUIAppLauncherPageHost &&
+          url.host() != chrome::kChromeUIHelpHost &&
+          url.host() != chrome::kChromeUIVersionHost &&

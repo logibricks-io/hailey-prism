@@ -1,7 +1,8 @@
 Subject: [PATCH 0017] Prism: native brand chrome elements (recon §5)
 
 - Omnibox leading chip: LogiBricks mark + "Prism" pill at the left edge of
-  the location bar (LocationBarView leading decorations, leftmost).
+  the location bar (LocationBarView leading decorations, leftmost; the chip
+  is pinned to ego's measured 22 DIP height, vertically centered).
 - Top-right toolbar button: LogiBricks mark with a dark circular badge
   counting agent-controlled spaces (hidden at 0; 1s poll of SpaceManager,
   same source and cadence as the Dock badge). The badge is composited into
@@ -83,16 +84,22 @@ index 0353e3f..2f5329d 100644
    // Initialize the Omnibox view. browser_ can be nullptr on ChromeOS in the
    // case of simple_web_view_dialog. Or it can be nulltpr on ChromeOS and on
    // other desktop platforms in the case of presentation_receiver_window_view.
-@@ -912,6 +917,13 @@ void LocationBarView::Layout(PassKey) {
+@@ -912,6 +917,19 @@ void LocationBarView::Layout(PassKey) {
        LayoutConstant::kLocationBarTrailingDecorationEdgePadding);
  
    const int location_height = std::max(height() - (vertical_padding * 2), 0);
 +
-+  // Prism: the brand chip is always the leftmost decoration.
++  // Prism: the brand chip is always the leftmost decoration. The layout
++  // stretches decorations to the full location height; pin the chip to ego's
++  // measured 22 DIP instead, vertically centered.
 +  if (brand_chip_view_) {
-+    leading_decorations.AddDecoration(vertical_padding, location_height, false,
-+                                      0, /*intra_item_padding=*/6, icon_left,
-+                                      brand_chip_view_);
++    constexpr int kBrandChipHeight = 22;
++    const int chip_offset =
++        std::max((location_height - kBrandChipHeight) / 2, 0);
++    leading_decorations.AddDecoration(
++        vertical_padding + chip_offset,
++        std::min(location_height, kBrandChipHeight), false, 0,
++        /*intra_item_padding=*/6, icon_left, brand_chip_view_);
 +  }
    // The largest fraction of the omnibox that can be taken by the EV or search
    // label/chip.
