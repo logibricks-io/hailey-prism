@@ -239,6 +239,63 @@ int PrismSpaceWindowDelegate::SpaceIdForWebContents(content::WebContents* wc) {
   return 0;
 }
 
+int PrismSpaceWindowDelegate::SpaceIdForWindow(
+    const BrowserWindowInterface* window) const {
+  for (const auto& [space_id, candidate] : windows_) {
+    if (candidate == window) {
+      return space_id;
+    }
+  }
+  return 0;
+}
+
+void PrismSpaceWindowDelegate::RegisterSpacesMode(
+    BrowserWindowInterface* window,
+    content::WebContents* wall_wc,
+    SpacesModeExitCallback exit_cb) {
+  if (!wall_wc) {
+    return;
+  }
+  spaces_modes_[wall_wc] = {window, std::move(exit_cb)};
+}
+
+void PrismSpaceWindowDelegate::UnregisterSpacesMode(
+    content::WebContents* wall_wc) {
+  spaces_modes_.erase(wall_wc);
+}
+
+bool PrismSpaceWindowDelegate::IsSpacesModeWebContents(
+    const content::WebContents* wc) const {
+  return wc && spaces_modes_.contains(const_cast<content::WebContents*>(wc));
+}
+
+int PrismSpaceWindowDelegate::SpaceIdForModeWebContents(
+    content::WebContents* wc) {
+  auto it = spaces_modes_.find(wc);
+  if (it == spaces_modes_.end()) {
+    return 0;
+  }
+  return SpaceIdForWindow(it->second.window);
+}
+
+void PrismSpaceWindowDelegate::ExitSpacesMode(
+    content::WebContents* wall_wc,
+    std::optional<int> open_space_id) {
+  auto it = spaces_modes_.find(wall_wc);
+  if (it == spaces_modes_.end()) {
+    return;
+  }
+  // Copy out: the callback unregisters itself (restores normal chrome).
+  SpacesModeExitCallback exit = it->second.exit;
+  exit.Run();
+  if (open_space_id.has_value()) {
+    SpaceManager* manager = SpaceManager::GetInstance();
+    manager->set_focused_space_id(*open_space_id);
+    ShowTaskSpace(*open_space_id, {});
+    manager->SetWindowShown(*open_space_id, true);
+  }
+}
+
 void PrismSpaceWindowDelegate::FocusSpaceWindow(int space_id) {
   BrowserWindowInterface* window = FindSpaceWindow(space_id);
   if (!window) {

@@ -1,0 +1,383 @@
+Subject: [PATCH 0020] Prism: spaces dashboard as a window-level mode
+
+Recon §8: ego's spaces dashboard is a native overlay mode of the browser
+window, not a tab. SetSpacesModeActive() switches the whole window:
+- the toolbar row, bookmark bar, and infobar container collapse
+  (visibility-gated layout via IsToolbarVisible / IsBookmarkBarVisible /
+  IsInfobarVisible); TopContainerView's children and the Reload menu
+  button hide individually so no control lingers in the macOS
+  accessibility tree;
+- the tab strip row reduces to the mode bar: native "N Spaces ⌄" caption
+  centered at tab-strip height (PrismSpacesCaptionButton, overlay) + the
+  corner spaces trigger (patch 0019) — tabs and all other buttons hide;
+- the spaces wall (PrismSpacesModeHost, overlay: a views::WebView hosting
+  chrome://prism-spaces?window=1) fills the client area edge to edge,
+  laid out in BrowserView::Layout below the tab-strip row. The contents
+  container's children hide and the active tab is WasHidden/WasShown, so
+  the covered page leaves the accessibility tree (the container itself
+  must stay visible — the tabbed layout CHECKs it).
+
+No dashboard tab ever exists; ⌥S / corner trigger / agent menu toggle the
+mode; choosing a card or a caption item exits into that space
+(focus + show completion matches the wall's own exit action).
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+index 1ee53fd..7ef060b 100644
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -1456,6 +1456,10 @@ static_library("ui") {
+       "//chrome/browser/ui/views/prism/prism_brand_mark.h",
+       "//chrome/browser/ui/views/prism/prism_spaces_button.cc",
+       "//chrome/browser/ui/views/prism/prism_spaces_button.h",
++      "//chrome/browser/ui/views/prism/prism_spaces_caption_button.cc",
++      "//chrome/browser/ui/views/prism/prism_spaces_caption_button.h",
++      "//chrome/browser/ui/views/prism/prism_spaces_mode_host.cc",
++      "//chrome/browser/ui/views/prism/prism_spaces_mode_host.h",
+       "//chrome/browser/ui/views/prism/prism_toolbar_button.cc",
+       "//chrome/browser/ui/views/prism/prism_toolbar_button.h",
+       "browser_tab_restorer.cc",
+diff --git a/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc
+index 60d924a..517be68 100644
+--- a/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc
+@@ -28,6 +28,7 @@
+ #include "chrome/browser/ui/views/chrome_layout_provider.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+ #include "chrome/browser/ui/views/prism/prism_spaces_button.h"
++#include "chrome/browser/ui/views/prism/prism_spaces_caption_button.h"
+ #include "chrome/browser/ui/views/tab_search_bubble_host.h"
+ #include "chrome/browser/ui/views/tabs/browser_tab_strip_controller.h"
+ #include "chrome/browser/ui/views/tabs/dragging/tab_drag_controller.h"
+@@ -279,6 +280,22 @@ HorizontalTabStripRegionView::HorizontalTabStripRegionView(
+                                       views::LayoutAlignment::kCenter);
+   }
+ 
++  // Prism: the spaces-mode caption (recon §8), hidden until the mode bar
++  // replaces the tabs. It flexes to fill the row so its text centers.
++  if (browser &&
++      (browser->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL)) {
++    prism_spaces_caption_ = AddChildView(
++        std::make_unique<prism::PrismSpacesCaptionButton>(browser));
++    prism_spaces_caption_->SetProperty(
++        views::kFlexBehaviorKey,
++        views::FlexSpecification(views::LayoutOrientation::kHorizontal,
++                                 views::MinimumFlexSizeRule::kScaleToZero,
++                                 views::MaximumFlexSizeRule::kUnbounded));
++    prism_spaces_caption_->SetProperty(views::kCrossAxisAlignmentKey,
++                                       views::LayoutAlignment::kCenter);
++    prism_spaces_caption_->SetVisible(false);
++  }
++
+   SetProperty(views::kElementIdentifierKey, kTabStripRegionElementId);
+ 
+   if (tab_strip_action_container) {
+@@ -364,6 +381,10 @@ views::View::Views HorizontalTabStripRegionView::GetChildrenInZOrder() {
+     children.emplace_back(tab_strip_action_container_.get());
+   }
+ 
++  if (prism_spaces_caption_) {
++    children.emplace_back(prism_spaces_caption_.get());
++  }
++
+   if (prism_spaces_button_) {
+     children.emplace_back(prism_spaces_button_.get());
+   }
+@@ -493,6 +514,40 @@ views::Button* HorizontalTabStripRegionView::GetTabSearchButton() {
+   return nullptr;
+ }
+ 
++void HorizontalTabStripRegionView::SetSpacesMode(bool active) {
++  if (spaces_mode_ == active) {
++    return;
++  }
++  spaces_mode_ = active;
++  if (active) {
++    spaces_mode_saved_visibility_.clear();
++    auto stash = [this](views::View* view) {
++      if (view) {
++        spaces_mode_saved_visibility_.emplace_back(view, view->GetVisible());
++        view->SetVisible(false);
++      }
++    };
++    stash(tab_strip_);
++    stash(combo_button_);
++    stash(unfocus_button_);
++    stash(new_tab_button_);
++    stash(tab_strip_action_container_);
++    stash(reserved_grab_handle_space_);
++  } else {
++    for (const auto& [view, was_visible] : spaces_mode_saved_visibility_) {
++      view->SetVisible(was_visible);
++    }
++    spaces_mode_saved_visibility_.clear();
++    if (tab_strip_) {
++      tab_strip_->SetVisible(true);
++    }
++  }
++  if (prism_spaces_caption_) {
++    prism_spaces_caption_->SetVisible(active);
++  }
++  PreferredSizeChanged();
++}
++
+ views::LabelButton* HorizontalTabStripRegionView::GetGlicButton() {
+   return tab_strip_action_container_
+              ? tab_strip_action_container_->GetGlicButton()
+diff --git a/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.h b/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.h
+index 8e527e9..69c445c 100644
+--- a/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.h
++++ b/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.h
+@@ -27,6 +27,7 @@ class NewTabButton;
+ 
+ namespace prism {
+ class PrismSpacesButton;
++class PrismSpacesCaptionButton;
+ }  // namespace prism
+ class TabStripActionContainer;
+ class TabSearchButton;
+@@ -77,6 +78,10 @@ class HorizontalTabStripRegionView final : public TabStripRegionView {
+   TabStrip* tab_strip() { return tab_strip_; }
+ 
+   views::Button* GetTabSearchButton();
++
++  // Prism: enters/leaves the spaces-mode top row (recon §8): tabs and the
++  // other buttons hide; only the spaces caption + corner trigger remain.
++  void SetSpacesMode(bool active);
+   TabStripComboButton* GetComboButton() { return combo_button_; }
+ 
+   views::LabelButton* GetGlicButton();
+@@ -142,6 +147,11 @@ class HorizontalTabStripRegionView final : public TabStripRegionView {
+   raw_ptr<views::Button> new_tab_button_ = nullptr;
+   // Prism: spaces dashboard trigger at the top-right corner (recon §7).
+   raw_ptr<prism::PrismSpacesButton> prism_spaces_button_ = nullptr;
++  // Prism: the spaces mode's top-center caption (recon §8), visible only
++  // while the window-level dashboard is active.
++  raw_ptr<prism::PrismSpacesCaptionButton> prism_spaces_caption_ = nullptr;
++  bool spaces_mode_ = false;
++  std::vector<std::pair<raw_ptr<views::View>, bool>> spaces_mode_saved_visibility_;
+   raw_ptr<TabStripControlButton> unfocus_button_ = nullptr;
+ 
+   std::unique_ptr<views::ActionViewController> action_view_controller_;
+diff --git a/chrome/browser/ui/views/frame/browser_view.cc b/chrome/browser/ui/views/frame/browser_view.cc
+index 4a2d263..b7340d8 100644
+--- a/chrome/browser/ui/views/frame/browser_view.cc
++++ b/chrome/browser/ui/views/frame/browser_view.cc
+@@ -4,6 +4,11 @@
+ 
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+ 
++#include "chrome/browser/prism/prism_space_window_delegate.h"
++#include "prism/browser/spaces/space_manager.h"
++#include "chrome/browser/ui/views/prism/prism_spaces_mode_host.h"
++#include "chrome/browser/ui/views/toolbar/reload_button.h"
++
+ #include <stdint.h>
+ 
+ #include <algorithm>
+@@ -1039,6 +1044,15 @@ BrowserView::BrowserView(Browser* browser)
+   window_scrim_view_ = AddChildView(std::make_unique<ScrimView>());
+   window_scrim_view_->layer()->SetName("WindowScrimView");
+ 
++  // Prism: the spaces-mode wall host (recon §8) — added last so it paints
++  // above the normal client area while the mode is active.
++  spaces_mode_host_ = AddChildView(std::make_unique<prism::PrismSpacesModeHost>(
++      GetProfile(), browser_.get(),
++      base::BindRepeating(&BrowserView::SetSpacesModeActive,
++                          weak_ptr_factory_.GetWeakPtr(), false,
++                          std::nullopt)));
++  spaces_mode_host_->SetVisible(false);
++
+ #if BUILDFLAG(IS_WIN)
+   // Create a custom JumpList and add it to an observer of TabRestoreService
+   // so we can update the custom JumpList when a tab is added or removed.
+@@ -2918,6 +2932,10 @@ void BrowserView::MaybeShowReadingListInSidePanelIPH() {
+ }
+ 
+ bool BrowserView::IsBookmarkBarVisible() const {
++  // Prism: the bookmark bar collapses while spaces mode is active (recon §8).
++  if (spaces_mode_active_) {
++    return false;
++  }
+   if (!browser_->SupportsWindowFeature(
+           Browser::WindowFeature::kFeatureBookmarkBar)) {
+     return false;
+@@ -2956,6 +2974,10 @@ void BrowserView::DisableTabStripEditingForTesting() {
+ }
+ 
+ bool BrowserView::IsToolbarVisible() const {
++  // Prism: the toolbar row collapses while spaces mode is active (recon §8).
++  if (spaces_mode_active_) {
++    return false;
++  }
+ #if BUILDFLAG(IS_MAC)
+   // Immersive full screen makes it possible to display the toolbar when
+   // kShowFullscreenToolbar is not set.
+@@ -4699,6 +4721,101 @@ gfx::Size BrowserView::GetMinimumSize() const {
+ }
+ 
+ ///////////////////////////////////////////////////////////////////////////////
++void BrowserView::SetSpacesModeActive(bool active,
++                                     std::optional<int> open_space_id) {
++  if (active == spaces_mode_active_ ||
++      browser_->GetType() != BrowserWindowInterface::Type::TYPE_NORMAL) {
++    return;
++  }
++  spaces_mode_active_ = active;
++  // Collapse the normal chrome: toolbar, bookmark bar, infobars; the tab
++  // strip row reduces to the spaces caption + corner trigger.
++  // TopContainerView's children hide individually — some toolbar children
++  // (e.g. the Reload menu button) otherwise linger in the macOS
++  // accessibility tree.
++  for (views::View* child : top_container_->children()) {
++    if (active) {
++      spaces_mode_contents_visibility_[child] = child->GetVisible();
++      child->SetVisible(false);
++    } else {
++      auto it = spaces_mode_contents_visibility_.find(child);
++      child->SetVisible(it != spaces_mode_contents_visibility_.end()
++                            ? it->second
++                            : true);
++    }
++  }
++  toolbar_->SetVisible(!active);
++  // The Reload menu button's menu-model adapter keeps an AXPopUpButton in
++  // the macOS accessibility tree even when the toolbar hides — hide it
++  // explicitly for the mode's duration.
++  if (ReloadButton* reload = toolbar_->reload_button()) {
++    reload->SetVisible(!active);
++  }
++  // The covered tab content leaves the accessibility tree only through the
++  // renderer visibility channel on macOS — the same WasHidden/WasShown a
++  // background tab gets.
++  if (content::WebContents* active_wc =
++          browser_->tab_strip_model()->GetActiveWebContents()) {
++    if (active) {
++      active_wc->WasHidden();
++    } else {
++      active_wc->WasShown();
++    }
++  }
++  if (bookmark_bar_view_) {
++    if (active) {
++      bookmark_bar_was_visible_ = bookmark_bar_view_->GetVisible();
++      bookmark_bar_view_->SetVisible(false);
++    } else {
++      bookmark_bar_view_->SetVisible(bookmark_bar_was_visible_);
++    }
++  }
++  infobar_container_->SetVisible(!active);
++  // The wall covers the client area; also pull the tab contents out of the
++  // accessibility tree/hit-testing for the mode's duration (recon §8: ego's
++  // dashboard exposes no page content). The container itself must stay
++  // visible (BrowserViewTabbedLayoutImpl CHECKs it), so hide its children.
++  for (views::View* child : contents_container_->children()) {
++    if (active) {
++      spaces_mode_contents_visibility_[child] = child->GetVisible();
++      child->SetVisible(false);
++    } else {
++      auto it = spaces_mode_contents_visibility_.find(child);
++      child->SetVisible(it != spaces_mode_contents_visibility_.end()
++                            ? it->second
++                            : true);
++    }
++  }
++  if (!active) {
++    spaces_mode_contents_visibility_.clear();
++  }
++  horizontal_tab_strip_region_view_->SetSpacesMode(active);
++  if (active) {
++    spaces_mode_host_->ShowSpacesWall();
++  } else {
++    spaces_mode_host_->HideSpacesWall();
++  }
++  PreferredSizeChanged();
++  if (!active && open_space_id.has_value()) {
++    // Same completion as the wall's own exit action: focus + show.
++    prism::SpaceManager* manager = prism::SpaceManager::GetInstance();
++    manager->set_focused_space_id(*open_space_id);
++    prism::GetPrismSpaceWindowDelegate()->ShowTaskSpace(*open_space_id, {});
++    manager->SetWindowShown(*open_space_id, true);
++  }
++}
++
++void BrowserView::LayoutSpacesModeHost() {
++  if (!spaces_mode_host_ || !spaces_mode_host_->GetVisible()) {
++    return;
++  }
++  // The wall fills the client area below the tab-strip row, edge to edge.
++  const int top = horizontal_tab_strip_region_view_
++                      ? horizontal_tab_strip_region_view_->bounds().bottom()
++                      : 0;
++  spaces_mode_host_->SetBounds(0, top, width(), height() - top);
++}
++
+ // BrowserView, views::View overrides:
+ 
+ void BrowserView::Layout(PassKey) {
+@@ -4722,6 +4839,8 @@ void BrowserView::Layout(PassKey) {
+ 
+   LayoutSuperclass<views::View>(this);
+ 
++  LayoutSpacesModeHost();
++
+   // TODO(jamescook): Why was this in the middle of layout code?
+   toolbar_->location_bar()->UpdateFocusBehavior(IsToolbarVisible());
+   GetFrameView()->UpdateMinimumSize();
+diff --git a/chrome/browser/ui/views/frame/browser_view.h b/chrome/browser/ui/views/frame/browser_view.h
+index c6bcc52..f2bb53c 100644
+--- a/chrome/browser/ui/views/frame/browser_view.h
++++ b/chrome/browser/ui/views/frame/browser_view.h
+@@ -82,6 +82,10 @@ struct DropData;
+ class ExclusiveAccessBubbleViews;
+ class ExclusiveAccessBubbleViewsContext;
+ class InfoBarContainerView;
++
++namespace prism {
++class PrismSpacesModeHost;
++}  // namespace prism
+ class LocationBarView;
+ class MultiContentsView;
+ class ProjectsPanelView;
+@@ -558,6 +562,13 @@ class BrowserView : public BrowserWindow,
+   bool IsTabStripEditable() const override;
+   void DisableTabStripEditingForTesting() override;
+   bool IsToolbarVisible() const override;
++
++  // Prism: spaces mode (recon §8) — the window-level dashboard presentation.
++  // While active, the toolbar/bookmark/infobar rows collapse, the tab strip
++  // row reduces to caption + corner trigger, and the spaces wall fills the
++  // client area. `open_space_id` (exit only) focuses + shows that space.
++  void SetSpacesModeActive(bool active, std::optional<int> open_space_id);
++  bool spaces_mode_active() const { return spaces_mode_active_; }
+   bool IsToolbarShowing() const override;
+   bool IsLocationBarVisible() const override;
+   bool IsUnframedModeEnabled() const override;
+@@ -1168,6 +1179,14 @@ class BrowserView : public BrowserWindow,
+   raw_ptr<HorizontalTabStripRegionView> horizontal_tab_strip_region_view_ =
+       nullptr;
+ 
++  // Prism: the fullscreen host of the spaces wall while spaces mode is
++  // active (recon §8); positioned by LayoutSpacesModeHost().
++  raw_ptr<prism::PrismSpacesModeHost> spaces_mode_host_ = nullptr;
++  bool spaces_mode_active_ = false;
++  bool bookmark_bar_was_visible_ = false;
++  std::map<raw_ptr<views::View>, bool> spaces_mode_contents_visibility_;
++  void LayoutSpacesModeHost();
++
+   // The insertion index of the HorizontalTabStripRegionView in the BrowserView
+   // view tree. This is used to correctly reparent the tabstrip when exiting
+   // fullscreen mode. See BrowserView::ReparentTopContainerForEndOfImmersive.
+diff --git a/chrome/browser/ui/views/frame/layout/browser_view_layout_delegate_impl.cc b/chrome/browser/ui/views/frame/layout/browser_view_layout_delegate_impl.cc
+index 3dea27b..1540908 100644
+--- a/chrome/browser/ui/views/frame/layout/browser_view_layout_delegate_impl.cc
++++ b/chrome/browser/ui/views/frame/layout/browser_view_layout_delegate_impl.cc
+@@ -127,6 +127,10 @@ bool BrowserViewLayoutDelegateImpl::IsBookmarkBarVisible() const {
+ }
+ 
+ bool BrowserViewLayoutDelegateImpl::IsInfobarVisible() const {
++  // Prism: infobars collapse while spaces mode is active (recon §8).
++  if (browser_view_->spaces_mode_active()) {
++    return false;
++  }
+   auto* const container = browser_view_->infobar_container();
+   if (!container || container->IsEmpty()) {
+     return false;

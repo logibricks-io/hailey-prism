@@ -307,27 +307,33 @@ async function runPhase4Suite(cdp, profileDir) {
   await new Promise((resolve) => setTimeout(resolve, 1200));
   // The page renders the card wall into #wall (WebUI renderers cannot fetch
   // chrome:// subresources, so data flows via chrome.send +
-  // CallJavascriptFunction).
-  const readText = () => cdp.send("Runtime.evaluate", {
-    expression: "document.getElementById('wall')?.innerText ?? ''",
+  // CallJavascriptFunction). Since the §8 ego-parity redesign the cards are
+  // bare thumbnails: space identity/state travels as data-* attributes on
+  // .card (docs/binding-contract.md §wall), not as visible text.
+  const readCards = () => cdp.send("Runtime.evaluate", {
+    expression: `Array.from(document.querySelectorAll('#wall .card[data-space]'))
+      .map((c) => ({ id: c.dataset.space, name: c.dataset.name,
+        ownership: c.dataset.ownership, state: c.dataset.state,
+        windowShown: c.dataset.windowShown }))`,
     returnByValue: true,
-  }, pageSession).then((r) => r.result?.value ?? "");
+  }, pageSession).then((r) => r.result?.value ?? []);
 
-  let text = await readText();
+  let cards = await readCards();
   check("phase4: management page lists both spaces with ownership",
-    text.includes("phase4-space") && text.includes("phase4-other") &&
-      text.includes("Window open"),
-    text.split("\n").slice(0, 3).join(" / "));
+    cards.some((c) => c.name === "phase4-space" && c.ownership === "agent" &&
+        c.windowShown === "1") &&
+      cards.some((c) => c.name === "phase4-other"),
+    JSON.stringify(cards));
 
   await cdp.send("Prism.setAgentTaskState", { label: "running the phase-4 probe" });
   await cdp.send("Runtime.evaluate", {
     expression: "chrome.send('querySpaces')", returnByValue: true,
   }, pageSession);
   await new Promise((resolve) => setTimeout(resolve, 400));
-  text = await readText();
+  cards = await readCards();
   check("phase4: setAgentTaskState visible on the management page",
-    text.includes("running the phase-4 probe"),
-    text.split("\n").find((l) => l.includes("phase-4 probe")) ?? "(absent)");
+    cards.some((c) => (c.state || "").includes("running the phase-4 probe")),
+    JSON.stringify(cards.map((c) => c.state)));
 
   const wire = (await cdp.send("Prism.listTaskSpaces")).taskSpaces
     .find((s) => s.id === other.id);
@@ -441,7 +447,7 @@ async function runPhase5Suite(cdp) {
   check("phase5: overview renders one card per space plus the create card",
     !!rendered, `cards=${await evalIn("document.querySelectorAll('#wall .card').length")}`);
   const names = await evalIn(
-    "Array.from(document.querySelectorAll('#wall .card .name')).map((n) => n.textContent).join(',')");
+    "Array.from(document.querySelectorAll('#wall .card[data-space]')).map((n) => n.dataset.name).join(',')");
   check("phase5: cards carry the space names",
     names.includes("phase5-alpha") && names.includes("phase5-beta"), names);
   const countText = await evalIn(
@@ -465,7 +471,7 @@ async function runPhase5Suite(cdp) {
   await evalIn(`chrome.send('spaceAction', [${spaceB.id}, 'focus'])`);
   const focusedName = await pollUntil(async () => {
     const name = await evalIn(
-      "(document.querySelector('#wall .card.focused .name') || {}).textContent || ''");
+      "(document.querySelector('#wall .card.focused') || {}).dataset?.name || ''");
     return name === "phase5-beta" ? name : null;
   });
   check("phase5: card focus switches SpaceManager focus + highlight",

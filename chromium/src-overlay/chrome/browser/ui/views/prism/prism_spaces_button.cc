@@ -8,6 +8,7 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/prism/prism_space_window_delegate.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
 #include "components/vector_icons/vector_icons.h"
 #include "prism/browser/spaces/space_manager.h"
 #include "ui/color/color_provider.h"
@@ -88,8 +89,15 @@ PrismSpacesButton::PrismSpacesButton(
     : TabStripControlButton(
           browser_window_interface,
           base::BindRepeating(
+              // recon §8: the trigger toggles the window-level spaces mode
+              // (same as ⌥S) instead of opening the overview in a tab.
               [](BrowserWindowInterface* bwi, const ui::Event&) {
-                GetPrismSpaceWindowDelegate()->OpenSpacesOverview(bwi);
+                if (auto* browser_view =
+                        BrowserView::GetBrowserViewForNativeWindow(
+                            bwi->GetWindow()->GetNativeWindow())) {
+                  browser_view->SetSpacesModeActive(
+                      !browser_view->spaces_mode_active(), std::nullopt);
+                }
               },
               browser_window_interface),
           // The stored vector icon is never painted: UpdateIcon() below draws

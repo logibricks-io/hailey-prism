@@ -5,8 +5,10 @@
 #define CHROME_BROWSER_PRISM_PRISM_SPACE_WINDOW_DELEGATE_H_
 
 #include <map>
+#include <optional>
 #include <set>
 
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/timer/timer.h"
 #include "prism/browser/spaces/space_window_delegate.h"
@@ -57,6 +59,9 @@ class PrismSpaceWindowDelegate : public SpaceWindowDelegate {
   // it lives in the implicit default space's window (or no tracked window).
   // Used by the dashboard to know which card is "current" (recon §7).
   int SpaceIdForWebContents(content::WebContents* wc);
+  // Inverse of the windows_ map: the space tracked to `window`, or 0 for the
+  // implicit default space (window hosts no task space).
+  int SpaceIdForWindow(const BrowserWindowInterface* window) const;
   // Raises the window hosting `space_id` (Show + Activate). No-op when the
   // space has no tracked window. Used by the toolbar/omnibox agent menu.
   void FocusSpaceWindow(int space_id);
@@ -64,6 +69,26 @@ class PrismSpaceWindowDelegate : public SpaceWindowDelegate {
   // browsing area] + the spaces by id, raising the matching window. The
   // default space maps to the first window that hosts no space.
   void CycleToNextSpace();
+
+  // ---- Spaces window mode (recon §8): the dashboard as a window-level mode
+  // instead of a tab. BrowserView owns the mode state + the wall WebContents
+  // (views layer); the delegate keeps a registry keyed by the wall
+  // WebContents so the WebUI can ask for its "current" space and request the
+  // mode exit without including BrowserView (layering).
+  using SpacesModeExitCallback = base::RepeatingCallback<void()>;
+
+  void RegisterSpacesMode(BrowserWindowInterface* window,
+                          content::WebContents* wall_wc,
+                          SpacesModeExitCallback exit_cb);
+  void UnregisterSpacesMode(content::WebContents* wall_wc);
+  bool IsSpacesModeWebContents(const content::WebContents* wc) const;
+  // The space the mode's window was showing when the mode opened (0 =
+  // default space), for the dashboard's "current" card.
+  int SpaceIdForModeWebContents(content::WebContents* wc);
+  // Restores normal chrome (via the registered callback) and, when
+  // `open_space_id` is set, focuses + shows that space.
+  void ExitSpacesMode(content::WebContents* wall_wc,
+                      std::optional<int> open_space_id);
 
  private:
   // Validated lookup: the tracked window, or nullptr when it was closed.
@@ -80,8 +105,15 @@ class PrismSpaceWindowDelegate : public SpaceWindowDelegate {
     raw_ptr<infobars::InfoBar> infobar;
   };
 
+  struct SpacesModeEntry {
+    raw_ptr<BrowserWindowInterface> window;
+    SpacesModeExitCallback exit;
+  };
+
   std::map<int, raw_ptr<BrowserWindowInterface>> windows_;
   std::map<int, TrackedBanner> banners_;
+  // Active spaces-mode presentations, keyed by the wall WebContents.
+  std::map<raw_ptr<content::WebContents>, SpacesModeEntry> spaces_modes_;
   // Spaces whose banner the user closed with the X; suppressed until the
   // ownership leaves kAgent (then re-enters).
   std::set<int> dismissed_banners_;

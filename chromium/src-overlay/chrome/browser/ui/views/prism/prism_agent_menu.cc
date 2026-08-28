@@ -8,6 +8,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/prism/prism_space_window_delegate.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
 #include "content/public/browser/navigation_controller.h"
 #include "prism/browser/spaces/space_manager.h"
 #include "ui/base/mojom/menu_source_type.mojom-forward.h"
@@ -53,7 +54,12 @@ class AgentMenuModel : public ui::SimpleMenuModel,
   bool IsCommandIdEnabled(int command_id) const override { return true; }
   void ExecuteCommand(int command_id, int event_flags) override {
     if (command_id == kCommandOpenOverview) {
-      GetPrismSpaceWindowDelegate()->OpenSpacesOverview(browser_);
+      // recon §8: opens the window-level spaces mode, not a tab.
+      if (auto* browser_view =
+              BrowserView::GetBrowserViewForBrowser(browser_)) {
+        browser_view->SetSpacesModeActive(
+            !browser_view->spaces_mode_active(), std::nullopt);
+      }
       return;
     }
     if (command_id == kCommandOpenWelcome) {

@@ -58,12 +58,12 @@ constexpr char kPageHtml[] = R"HTML(<!doctype html>
   body { font-family: -apple-system, system-ui, sans-serif;
          background: var(--bg-3); color: var(--text-1);
          margin: 0; padding: 24px 60px 88px; }
-  /* recon §7 enter/exit motion (~0.5-0.7s ease-out/spring) */
+  /* recon §7/§8 enter-exit motion (~0.5-0.7s ease-out/spring) */
   @keyframes card-in-right { from { opacity: 0;
                              transform: translateX(64px) scale(.98); } }
   @keyframes fade-in { from { opacity: 0; } }
   @keyframes thumb-pop { from { opacity: 0; transform: scale(.92); } }
-  .card.enter { animation: card-in-right .55s cubic-bezier(.2,.8,.25,1)
+  .item.enter { animation: card-in-right .55s cubic-bezier(.2,.8,.25,1)
                 backwards; animation-delay: var(--d, 0ms); }
   header.enter { animation: fade-in .4s ease .25s backwards; }
   #hintBar.enter { animation: fade-in .4s ease .35s backwards; }
@@ -71,15 +71,17 @@ constexpr char kPageHtml[] = R"HTML(<!doctype html>
                    backwards; animation-delay: var(--d, 0ms); }
   #fxOverlay { position: fixed; z-index: 100; pointer-events: none;
                object-fit: cover; object-position: top; background: #101010; }
-  #wall.fx-hidden, header.fx-hidden, #hintBar.fx-hidden,
-  .fx-fade { visibility: hidden; }
   .card.fx-self-hidden { opacity: 0; }
+
+  /* recon §8: hosted window-wide (?window=1) the page has no header — the
+     native top row (caption + corner trigger) replaces it. */
+  body.window-mode header { display: none; }
 
   header { display: flex; align-items: center; height: 40px; }
   header .brand { display: inline-flex; align-items: center; gap: 8px;
                   color: var(--text-2); font-weight: 600; font-size: 14px; }
   header .side { flex: 1; }
-  /* recon §4: "N Space(s) ⌄" sits top center */
+  /* recon §4: "N Space(s) ⌄" sits top center (tab-hosted page only) */
   #spacesCaption { position: relative; margin: 0 auto; }
   #captionBtn { display: inline-flex; align-items: center; gap: 7px;
                 background: none; border: 0; color: var(--text-1);
@@ -102,25 +104,27 @@ constexpr char kPageHtml[] = R"HTML(<!doctype html>
   #captionMenu .sub { margin-left: auto; color: var(--text-3);
                       font-size: 11.5px; }
 
-  /* recon §7: card row starts ≈8% from the top; uniform cards, ~40px gaps */
+  /* recon §7/§8: card row starts ≈8% from the top; uniform cards, 40px gaps */
   #wall { display: grid; grid-template-columns: repeat(auto-fill,
-          minmax(340px, 1fr)); gap: 40px;
+          minmax(340px, 1fr)); gap: 40px 40px;
           margin-top: max(12px, calc(8vh - 64px)); }
-  .card { background: var(--bg-1); border: 1px solid #ffffff0d;
-          border-radius: 16px; overflow: hidden; cursor: pointer;
+  body.window-mode #wall { margin-top: max(12px, calc(8vh - 24px)); }
+  .item { min-width: 0; }
+  /* The card is the thumbnail, edge to edge (recon §8): rounded, thin
+     border, blue when focused. */
+  .card { position: relative; border-radius: 14px; overflow: hidden;
+          cursor: pointer; background: #101010; aspect-ratio: 16 / 10;
+          border: 1px solid #ffffff0d;
           transition: border-color .15s, box-shadow .15s, transform .15s,
                       opacity .3s; }
   .card:hover { border-color: #ffffff26; transform: translateY(-2px); }
-  /* recon §4: selected space gets a blue border */
   .card.focused { border-color: var(--accent);
                   box-shadow: 0 0 0 1.5px var(--accent); }
-  .thumb { position: relative; aspect-ratio: 16 / 10; background: #101010;
-           display: flex; align-items: center; justify-content: center; }
+  .thumb { position: absolute; inset: 0; }
   .thumb img { position: absolute; inset: 0; width: 100%; height: 100%;
                object-fit: cover; object-position: top; }
-  .thumb .initial { font-size: 42px; font-weight: 700; color: #ffffff2e; }
-  /* recon §7: under each card — left "Space" label (agent cards: blue
-     "Running" chip + task name), right the dynamic watermark */
+  /* recon §7/§8: BELOW the card (outside) — left "Space" label (agent
+     cards: blue "Running" chip + task name), right the dynamic watermark */
   .cardfoot { display: flex; align-items: center; justify-content: space-between;
               gap: 10px; padding: 9px 4px 0; }
   .foot-left { display: inline-flex; align-items: center; gap: 8px;
@@ -129,33 +133,17 @@ constexpr char kPageHtml[] = R"HTML(<!doctype html>
                  white-space: nowrap; }
   .foot-task { font-size: 11.5px; color: var(--text-2); white-space: nowrap;
                overflow: hidden; text-overflow: ellipsis; }
-  .watermark { color: var(--text-3); font-size: 11px; white-space: nowrap; }
-  .meta { padding: 10px 14px 14px; }
-  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .name { font-size: 14.5px; font-weight: 600; }
   .chip { font-size: 11px; padding: 2px 8px; border-radius: 999px;
-          border: 1px solid #ffffff1f; color: var(--text-3); }
-  .chip.agent { color: #8fd3a5; border-color: #2f5d43; }
-  .chip.agentDelegatedToUser { color: #ffb86b; border-color: #6b4a2a; }
-  .chip.focused { color: var(--accent); border-color: var(--accent); }
-  /* recon §7: the agent "Running" chip is blue */
+          border: 1px solid #ffffff1f; color: var(--text-3);
+          white-space: nowrap; }
   .chip.running { color: var(--accent); border-color: var(--accent); }
-  .state { margin-top: 6px; color: var(--text-2); font-size: 12.5px;
-           min-height: 15px; }
-  .state:empty::before { content: "\2014"; color: var(--text-4); }
-  .actions { margin-top: 10px; display: flex; gap: 8px; }
-  button { background: #ffffff0f; color: var(--text-1); border: 0;
-           border-radius: 8px; padding: 5px 12px; font-size: 12.5px;
-           cursor: pointer; font-family: inherit; }
-  button:hover { background: #ffffff1a; }
-  button.danger:hover { background: #5d2f3d; }
-  /* recon §4: the "+" create card */
+  .watermark { color: var(--text-3); font-size: 11px; white-space: nowrap; }
+  /* recon §8: the "+" card is plain dark with a single large plus */
   .newspace { display: flex; align-items: center; justify-content: center;
-              gap: 8px; min-height: 220px; color: var(--text-3);
-              font-size: 14px; border: 1.5px dashed #ffffff21;
+              color: var(--text-3); border: 1.5px dashed #ffffff21;
               background: transparent; }
-  .newspace:hover { color: var(--text-1); border-color: var(--accent); }
-  .newspace .plus { font-size: 26px; color: var(--accent); }
+  .newspace:hover { border-color: var(--accent); }
+  .newspace .plus { font-size: 42px; font-weight: 300; color: var(--accent); }
   .empty { color: var(--text-3); }
 
   /* recon §4: first-run ⌥S hint bar (keyboard icon per recon §7) */
@@ -169,6 +157,11 @@ constexpr char kPageHtml[] = R"HTML(<!doctype html>
   #hintBar kbd { color: var(--text-1); font-family: inherit; font-weight: 600; }
   #hintBar button { border-radius: 50%; padding: 3px 8px;
                     color: var(--text-3); }
+  button { background: #ffffff0f; color: var(--text-1); border: 0;
+           border-radius: 8px; padding: 5px 12px; font-size: 12.5px;
+           cursor: pointer; font-family: inherit; }
+  button:hover { background: #ffffff1a; }
+  button.danger:hover { background: #5d2f3d; }
 </style></head><body>
 <header>
   <span class="brand"><svg width="18" height="18" viewBox="0 0 576 576" fill="none" aria-hidden="true"><rect x="0" y="0" width="158" height="158" rx="21" fill="#FBFBF9"/><rect x="0" y="209" width="158" height="158" rx="21" fill="#FBFBF9"/><rect x="0" y="418" width="158" height="158" rx="21" fill="#FBFBF9"/><rect x="209" y="418" width="158" height="158" rx="21" fill="#FBFBF9"/><rect x="418" y="418" width="158" height="158" rx="21" fill="#FBFBF9"/><circle cx="497" cy="79" r="71" fill="#C87858"/></svg>Prism</span>
@@ -192,6 +185,10 @@ constexpr char kPageHtml[] = R"HTML(<!doctype html>
 constexpr char kAppJs[] = R"JS(let refreshCounter = 0;
 let entered = false;
 let exiting = false;
+// recon §8: hosted window-wide (?window=1) the page strips its header and
+// card clicks exit the window-level mode instead of just focusing.
+const windowMode = location.search.indexOf("window=1") !== -1;
+if (windowMode) document.body.classList.add("window-mode");
 function action(id, kind) {
   chrome.send("spaceAction", [id, kind]);
   setTimeout(refresh, 250);
@@ -204,13 +201,8 @@ function span(parent, className, text) {
   parent.appendChild(el);
   return el;
 }
-function ownershipLabel(space) {
-  if (space.ownership === "agent") return "Agent";
-  if (space.ownership === "agentDelegatedToUser") return "Delegated to you";
-  return "Yours";
-}
 
-// ---- top-center "N Space(s) ⌄" caption + dropdown (recon §4) ----
+// ---- top-center "N Space(s) ⌄" caption + dropdown (tab-hosted page) ----
 const captionBtn = document.getElementById("captionBtn");
 const captionMenu = document.getElementById("captionMenu");
 captionBtn.addEventListener("click", (e) => {
@@ -243,30 +235,27 @@ function buildCaptionMenu(spaces, focused) {
 const hintBar = document.getElementById("hintBar");
 try {
   if (!localStorage.getItem("prismSpacesHintDismissed")) hintBar.hidden = false;
-} catch (e) { /* storage unavailable: show the hint */ hintBar.hidden = false; }
+} catch (e) { hintBar.hidden = false; }
 document.getElementById("hintDismiss").addEventListener("click", () => {
   hintBar.hidden = true;
   try { localStorage.setItem("prismSpacesHintDismissed", "1"); } catch (e) {}
 });
 
-// ---- recon §7 enter motion (~0.5-0.7s ease-out) ---------------------------
-// The live page content lifts slightly and scales down into its card slot
-// with a crossfade; the other cards stagger/slide in from the right; the
-// caption and the hint bar fade in; agent cards' live content pops in after
-// the transition settles.
+// ---- recon §7/§8 enter motion (~0.5-0.7s ease-out) -----------------------
 const header = document.querySelector("header");
-function revealEnter(focusedCard, overlayImg) {
-  header.classList.add("enter");
+function revealEnter(focusedCard) {
+  if (!windowMode) header.classList.add("enter");
   hintBar.classList.add("enter");
   let d = 120;
   let pop = 650;
-  for (const card of document.querySelectorAll("#wall .card")) {
-    if (card !== focusedCard) {
-      card.style.setProperty("--d", d + "ms");
-      card.classList.add("enter");
+  for (const item of document.querySelectorAll("#wall .item")) {
+    if (item.querySelector(".card") !== focusedCard) {
+      item.style.setProperty("--d", d + "ms");
+      item.classList.add("enter");
       d += 55;
     }
-    if (card.dataset.agent === "1") {
+    const card = item.querySelector(".card");
+    if (card && card.dataset.agent === "1") {
       const img = card.querySelector(".thumb img");
       if (img) {
         img.style.setProperty("--d", pop + "ms");
@@ -275,12 +264,12 @@ function revealEnter(focusedCard, overlayImg) {
       }
     }
   }
-  if (focusedCard && overlayImg) runShrinkIn(focusedCard, overlayImg);
-  else if (focusedCard) focusedCard.classList.add("enter");
+  if (focusedCard && !focusedCard.classList.contains("fx-self-hidden")) {
+    focusedCard.closest(".item").classList.add("enter");
+  }
 }
 function runShrinkIn(card, overlayImg) {
   const thumb = card.querySelector(".thumb");
-  const img = card.querySelector(".thumb img");
   const rect = thumb.getBoundingClientRect();
   const fx = document.createElement("img");
   fx.id = "fxOverlay";
@@ -297,8 +286,8 @@ function runShrinkIn(card, overlayImg) {
   fx.animate([
     { transform: "translateY(-16px) scale(1)", opacity: 1,
       borderRadius: "0px" },
-    { transform: pos, opacity: 1, borderRadius: "16px", offset: 0.85 },
-    { transform: pos, opacity: 0, borderRadius: "16px" }
+    { transform: pos, opacity: 1, borderRadius: "14px", offset: 0.85 },
+    { transform: pos, opacity: 0, borderRadius: "14px" }
   ], { duration: 600, easing: "cubic-bezier(.2,.8,.25,1)", fill: "forwards" })
     .onfinish = () => { fx.remove(); card.classList.remove("fx-self-hidden"); };
 }
@@ -306,12 +295,10 @@ function playEnter(data) {
   const currentId = data.current || data.focused;
   const focusedCard = document.querySelector(
       `#wall .card[data-space="${currentId}"]`);
-  // Reveal the rest immediately (other cards stagger in, caption/hint fade);
-  // the focused card stays hidden until the shrink-in overlay lands in it —
-  // the overlay fetch doubles as the on-demand thumbnail, so it can trail
-  // the reveal (budget 900ms, then the card just slides in like the others).
+  // The current card stays hidden until the shrink-in overlay lands in it;
+  // the overlay fetch doubles as the on-demand thumbnail (900ms budget).
   if (focusedCard) focusedCard.classList.add("fx-self-hidden");
-  revealEnter(focusedCard, null);
+  revealEnter(focusedCard);
   const img = focusedCard && focusedCard.querySelector(".thumb img");
   if (!img) return;
   const pre = new Image();
@@ -323,7 +310,7 @@ function playEnter(data) {
       runShrinkIn(focusedCard, pre);
     } else {
       focusedCard.classList.remove("fx-self-hidden");
-      focusedCard.classList.add("enter");
+      focusedCard.closest(".item").classList.add("enter");
     }
   };
   pre.onload = () => finish(true);
@@ -332,14 +319,16 @@ function playEnter(data) {
   setTimeout(() => finish(false), 900);
 }
 
-// ---- recon §7 exit motion: the clicked card scales back up into the page --
+// ---- recon §7/§8 exit motion: the clicked card scales back up into the page
 function openSpace(card, id) {
-  if (exiting) { action(id, "focus"); return; }
+  if (exiting) { action(id, windowMode ? "exitSpaces" : "focus"); return; }
   exiting = true;
   const thumb = card.querySelector(".thumb");
   const img = card.querySelector(".thumb img");
-  for (const el of [header, hintBar, ...document.querySelectorAll("#wall .card")]) {
-    if (el !== card) {
+  const fadeTargets = [hintBar, ...document.querySelectorAll("#wall .item")];
+  if (!windowMode) fadeTargets.push(header);
+  for (const el of fadeTargets) {
+    if (!el.contains(card)) {
       el.style.transition = "opacity .3s ease";
       el.style.opacity = "0";
     }
@@ -352,7 +341,7 @@ function openSpace(card, id) {
     Object.assign(fx.style, { left: rect.left + "px", top: rect.top + "px",
                               width: rect.width + "px",
                               height: rect.height + "px",
-                              borderRadius: "16px" });
+                              borderRadius: "14px" });
     document.body.appendChild(fx);
     const dx = innerWidth / 2 - (rect.left + rect.width / 2);
     const dy = innerHeight / 2 - (rect.top + rect.height / 2) + 12;
@@ -361,15 +350,16 @@ function openSpace(card, id) {
     const pos = `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`;
     fx.animate([
       { transform: "translate(0px, 0px) scale(1)", opacity: 1,
-        borderRadius: "16px" },
+        borderRadius: "14px" },
       { transform: pos, opacity: 1, borderRadius: "0px", offset: 0.85 },
       { transform: pos, opacity: 0, borderRadius: "0px" }
     ], { duration: 550, easing: "cubic-bezier(.2,.8,.25,1)", fill: "forwards" })
       .onfinish = () => fx.remove();
   }
-  // Fire the focus action as the expansion crosses the fullscreen point; the
-  // native tab-set swap lands under the crossfade.
-  setTimeout(() => action(id, "focus"), 380);
+  // Fire as the expansion crosses fullscreen: window mode exits into the
+  // space; the tab-hosted page just focuses it.
+  setTimeout(() => action(id, windowMode ? "exitSpaces" : "focus"),
+             windowMode ? 500 : 380);
 }
 
 function onData(payloadJson) {
@@ -382,18 +372,22 @@ function onData(payloadJson) {
   const wall = document.getElementById("wall");
   wall.replaceChildren();
   for (const space of spaces) {
+    const item = document.createElement("div");
+    item.className = "item";
     const card = document.createElement("div");
     card.className = "card" + (space.id === data.focused ? " focused" : "");
+    // Automation contract (docs/binding-contract.md §wall): the space's
+    // identity/state travels as data attributes, not visible chrome.
     card.dataset.space = space.id;
+    card.dataset.name = space.name || "";
+    card.dataset.ownership = space.ownership;
+    card.dataset.state = space.agentTaskState || "";
+    card.dataset.windowShown = space.windowShown ? "1" : "0";
     if (space.ownership === "agent") card.dataset.agent = "1";
     card.addEventListener("click", () => openSpace(card, space.id));
 
     const thumb = document.createElement("div");
     thumb.className = "thumb";
-    const initial = document.createElement("div");
-    initial.className = "initial";
-    initial.textContent = (space.name || "?").trim().charAt(0).toUpperCase();
-    thumb.appendChild(initial);
     if (space.hasTabs) {
       const img = document.createElement("img");
       img.src = "thumb/" + space.id + "." + refreshCounter + ".png";
@@ -401,8 +395,9 @@ function onData(payloadJson) {
       thumb.appendChild(img);
     }
     card.appendChild(thumb);
+    item.appendChild(card);
 
-    // recon §7: under the card — left "Space" label (agent cards: blue
+    // recon §7/§8: under the card — left "Space" label (agent cards: blue
     // "Running" chip + task name), right the dynamic watermark.
     const foot = document.createElement("div");
     foot.className = "cardfoot";
@@ -415,53 +410,21 @@ function onData(payloadJson) {
     }
     foot.appendChild(left);
     span(foot, "watermark", data.watermark || "Your Prism");
-    card.appendChild(foot);
-
-    const meta = document.createElement("div");
-    meta.className = "meta";
-    const row = document.createElement("div");
-    row.className = "row";
-    span(row, "name", space.name);
-    span(row, "chip " + space.ownership, ownershipLabel(space));
-    if (space.id === data.focused) span(row, "chip focused", "Focused");
-    if (space.windowShown) span(row, "chip", "Window open");
-    meta.appendChild(row);
-    const state = document.createElement("div");
-    state.className = "state";
-    state.textContent = space.agentTaskState || "";
-    meta.appendChild(state);
-
-    const actions = document.createElement("div");
-    actions.className = "actions";
-    const specs = [["focus", "Focus"]];
-    if (space.ownership === "agent") specs.push(["handoff", "Hand off"]);
-    if (space.ownership === "agentDelegatedToUser")
-      specs.push(["takeover", "Return to agent"]);
-    specs.push(["close", "Close"]);
-    for (const [kind, label2] of specs) {
-      const btn = document.createElement("button");
-      btn.textContent = label2;
-      if (kind === "close") btn.className = "danger";
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        action(space.id, kind);
-      });
-      actions.appendChild(btn);
-    }
-    meta.appendChild(actions);
-    card.appendChild(meta);
-    wall.appendChild(card);
+    item.appendChild(foot);
+    wall.appendChild(item);
   }
 
+  const addItem = document.createElement("div");
+  addItem.className = "item";
   const add = document.createElement("div");
   add.className = "card newspace";
   const plus = document.createElement("span");
   plus.className = "plus";
   plus.textContent = "+";
   add.appendChild(plus);
-  add.appendChild(document.createTextNode(" Create a new Space"));
   add.addEventListener("click", () => action(0, "create"));
-  wall.appendChild(add);
+  addItem.appendChild(add);
+  wall.appendChild(addItem);
 
   if (!entered) {
     entered = true;
@@ -474,6 +437,16 @@ document.getElementById("deleteAll").addEventListener("click", () => {
 function refresh() {
   chrome.send("querySpaces");
 }
+// recon §8: re-shown in window mode (or re-entered) → replay the enter
+// motion and pull fresh thumbnails.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && windowMode) {
+    entered = false;
+    exiting = false;
+    refreshCounter++;
+    refresh();
+  }
+});
 refresh();
 setInterval(() => { refreshCounter++; refresh(); }, 2000);)JS";
 
@@ -651,6 +624,21 @@ std::string Watermark(content::WebUI* web_ui) {
   return name.empty() ? "Your Prism" : name + " Agents Prism";
 }
 
+// The space to highlight as "current" in the enter animation: the space
+// whose window hosts the dashboard — via the tab strip when tab-hosted
+// (automation), via the spaces-mode registry when hosted window-wide
+// (recon §8).
+int CurrentSpaceIdForWebContents(content::WebContents* wc) {
+  auto* delegate = GetPrismSpaceWindowDelegate();
+  if (!delegate) {
+    return 0;
+  }
+  if (int id = delegate->SpaceIdForWebContents(wc)) {
+    return id;
+  }
+  return delegate->SpaceIdForModeWebContents(wc);
+}
+
 std::string SpacesJson(const std::string& watermark, int current_space_id) {
   auto* manager = SpaceManager::GetInstance();
   base::DictValue root;
@@ -760,10 +748,7 @@ void PrismSpacesUI::OnQuerySpaces(const base::ListValue& args) {
   web_ui()->CallJavascriptFunctionUnsafe("prismSpaces.onData",
                                          base::ValueView(SpacesJson(
           Watermark(web_ui()),
-          GetPrismSpaceWindowDelegate()
-              ? GetPrismSpaceWindowDelegate()->SpaceIdForWebContents(
-                    web_ui()->GetWebContents())
-              : 0)));
+          CurrentSpaceIdForWebContents(web_ui()->GetWebContents()))));
 }
 
 void PrismSpacesUI::OnAction(const base::ListValue& args) {
@@ -790,6 +775,16 @@ void PrismSpacesUI::OnAction(const base::ListValue& args) {
       delegate->ShowTaskSpace(id, {});
       manager->SetWindowShown(id, true);
     }
+  } else if (action == "exitSpaces") {
+    // recon §8: card click inside the window-level dashboard — restore the
+    // normal chrome and open the chosen space (recon §8). No-op when the
+    // page is tab-hosted (automation keeps using "focus").
+    if (auto* delegate = GetPrismSpaceWindowDelegate();
+        delegate && delegate->IsSpacesModeWebContents(
+                        web_ui()->GetWebContents())) {
+      delegate->ExitSpacesMode(web_ui()->GetWebContents(), id);
+      return;
+    }
   } else if (action == "handoff") {
     manager->HandOff(id);
   } else if (action == "takeover") {
@@ -802,10 +797,7 @@ void PrismSpacesUI::OnAction(const base::ListValue& args) {
   web_ui()->CallJavascriptFunctionUnsafe("prismSpaces.onData",
                                          base::ValueView(SpacesJson(
           Watermark(web_ui()),
-          GetPrismSpaceWindowDelegate()
-              ? GetPrismSpaceWindowDelegate()->SpaceIdForWebContents(
-                    web_ui()->GetWebContents())
-              : 0)));
+          CurrentSpaceIdForWebContents(web_ui()->GetWebContents()))));
 }
 
 }  // namespace prism

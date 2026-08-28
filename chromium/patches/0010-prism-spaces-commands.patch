@@ -57,13 +57,18 @@ index a457075948..8ac2938f8a 100644
  #include "chrome/browser/profiles/profile.h"
  #include "chrome/browser/profiles/profile_window.h"
  #include "chrome/browser/sessions/tab_restore_service_factory.h"
-@@ -802,6 +803,12 @@ void BrowserCommandController::HandleCommandWithDisposition(
+@@ -802,6 +803,17 @@ void BrowserCommandController::HandleCommandWithDisposition(
      case IDC_NAME_WINDOW:
        PromptToNameWindow(browser_);
        break;
-+    case IDC_PRISM_SPACES_OVERVIEW:
-+      prism::GetPrismSpaceWindowDelegate()->OpenSpacesOverview(browser_);
++    case IDC_PRISM_SPACES_OVERVIEW: {
++      // recon §8: ⌥S toggles the window-level spaces mode (not a tab).
++      if (auto* browser_view = BrowserView::GetBrowserViewForBrowser(browser_)) {
++        browser_view->SetSpacesModeActive(!browser_view->spaces_mode_active(),
++                                          std::nullopt);
++      }
 +      break;
++    }
 +    case IDC_PRISM_CYCLE_SPACE:
 +      prism::GetPrismSpaceWindowDelegate()->CycleToNextSpace();
 +      break;

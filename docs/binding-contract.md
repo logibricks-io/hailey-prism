@@ -93,6 +93,24 @@ Harness-side ownership policy (host behavior must cooperate):
 
 Upgrades do not go through the bindings: they use the CLI's `prism-browser upgrade` subcommand.
 
+### 2.5 The spaces wall as an automation surface (§wall)
+
+`chrome://prism-spaces` stays directly navigable for automation: opened as a
+tab URL it renders the card wall with the in-page header (caption dropdown,
+"Delete all"), and `chrome.send("querySpaces" | "spaceAction")` works
+unchanged. Since the recon §8 redesign the user-facing dashboard is a
+**window-level mode** (no tab), and the cards are bare thumbnails — space
+identity and state no longer appear as visible text. The automation contract
+is therefore attribute-based: each `#wall .card[data-space]` carries
+`data-space` (id), `data-name`, `data-ownership` (`agent` \| `user` \|
+`agentDelegatedToUser`), `data-state` (the `setAgentTaskState` label),
+`data-window-shown` (`"1"`/`"0"`), and `data-agent` (`"1"` when
+agent-owned). The card count (`#wall .card`, including the create card),
+the focused highlight (`.card.focused`), the in-page `#captionText`
+("N Spaces"), and the thumbnail `img` (`.card[data-space] .thumb img`) are
+part of the same contract. Window-mode presentations hide the in-page
+header; the native top row (caption + corner trigger) is views UI, not DOM.
+
 ---
 
 ## 3. Error conventions

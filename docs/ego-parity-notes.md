@@ -211,36 +211,48 @@ Kulim Park (OFL) bundled for display type.
   live agent space for the badges): `docs/assets/brand-elements-*.png`,
   `docs/assets/spaces-*.png`.
 
-## C2. Spaces dashboard + motion (recon §7)
+## C2. Spaces dashboard as a window-level mode (recon §8)
 
-- Trigger placement per §7 (tab-strip corner, see §C). The overview itself
-  stays tab-hosted (`chrome://prism-spaces`), so window traffic lights and
-  the corner trigger/badge remain visible inside it.
-- Layout now matches the recon: card row starts ≈8% from the top, uniform
-  cards (`minmax(340px, 1fr)`), 40 px gaps, blue border on the focused
-  card, thin gray otherwise; under each card left = "Space" label (agent
-  cards add a blue "Running" chip + task name), right = dynamic watermark
-  `<account/display name> Agents Prism` from the profile's GAIA name with
-  "Your Prism" fallback; top-center "N Spaces ⌄"; trailing "+" dashed card;
-  bottom-center ⌥S hint bar with a keyboard icon.
-- Enter/exit motion (WebUI, ~0.55–0.6 s ease-out): on open, the current
-  space card's fresh capture starts fullscreen, lifts slightly (translateY)
-  and scales down into its card slot with a crossfade; the other cards
-  stagger/slide in from the right; caption + hint bar fade in; agent card
-  thumbnails pop in after settle. Card click runs the reverse expansion,
-  then fires the focus action mid-crossfade. "Current" is derived from the
-  window hosting the dashboard tab (`SpaceIdForWebContents`); the focused
-  highlight keeps the manager's focus id (probe semantics).
-- **Residual deltas**: (1) the implicit default space has no card, so
-  opening the dashboard from default-space browsing plays no shrink-in
-  overlay (nothing to scale into); (2) the overlay's fullscreen start lags
-  the open by the on-demand thumbnail fetch (budgeted 900 ms, then the card
-  just slides in) — a native mission-control overlay would start instantly;
-  (3) the dashboard tab stays open after focusing a space (ego's overlay
-  dismisses itself); (4) stagger distance/lift and the spring curve are
+- ego's dashboard is a native overlay mode of the window; ours is too now
+  (patch 0020): ⌘⇧S / corner trigger / agent menu toggle a spaces mode in
+  which the toolbar row, bookmark bar, and infobars collapse, the tab strip
+  row reduces to traffic lights + native "N Spaces ⌄" caption
+  (PrismSpacesCaptionButton) + the corner trigger (0019), and the wall
+  (chrome://prism-spaces?window=1 in a mode-owned views::WebView) fills the
+  client area. No dashboard tab exists; the covered tab is WasHidden.
+  Choosing a card or a caption item exits into that space.
+- Cards per recon §8: thumbnail edge to edge (rounded 14 px, thin border,
+  blue when focused), under the card (outside) left = "Space" label (agent
+  cards: blue "Running" chip + task name), right = dynamic watermark
+  `<display name> Agents Prism` / "Your Prism"; "+" card is plain dark with
+  a single large plus. No meta chips, no buttons, no placeholder letter.
+  Thumbnails re-capture on the 2 s poll while open (near-live).
+- Motion: same FLIP enter (current card's fresh capture lifts + scales
+  into its slot with crossfade, others stagger in from the right, caption +
+  hint fade, agent thumbs pop) and reverse exit expansion that fires
+  mid-crossfade. "Current" = the space of the window hosting the mode
+  (`SpaceIdForModeWebContents`); the focused highlight keeps the manager id.
+- Automation: chrome://prism-spaces opened as a tab URL still renders the
+  wall with the in-page header for CDP-driven clients; space identity/state
+  travels as `data-*` attributes on `.card` (docs/binding-contract.md
+  §wall); probe phase4/5 read attributes.
+- **Residual deltas**: (1) cards are periodic captures, not re-parented
+  live WebContents — true re-parenting into the card slot is out of scope,
+  so agent cards refresh every 2 s instead of rendering live; (2) the
+  implicit default space has no card — opening the mode from default-space
+  browsing plays no shrink-in overlay; (3) the shrink start lags the open
+  by the on-demand thumbnail fetch (900 ms budget, then plain slide-in);
+  (4) macOS AX keeps two invisible orphans in mode: the covered tab's
+  AXWebArea (standard background-tab exposure on macOS) and the Reload
+  menu button's AXPopUpButton (views/mac AX orphan of its menu model) —
+  nothing visible in either case; (5) focusing a space from the mode raises
+  that space's own window (our window-per-space model), it does not swap
+  this window's tab set the way ego does; (6) window title still follows
+  the underlying tab while in mode; (7) spring curve/stagger are
   approximations from the recording, not measured keyframes.
-- Verified silently: enter frames `docs/assets/spaces-enter-animation.png`
-  → settled `spaces-dashboard.png`; exit frame `spaces-exit-animation.png`.
+- Verified silently: `docs/assets/spaces-mode-dashboard.png` (mode top row
+  + fullscreen wall), `docs/assets/spaces-mode-exit.png` (chrome restored
+  after a card click).
 
 ## D. Spaces overview (`chrome://prism-spaces`)
 
