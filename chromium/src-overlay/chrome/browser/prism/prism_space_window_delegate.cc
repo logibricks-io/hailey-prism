@@ -209,6 +209,15 @@ void PrismSpaceWindowDelegate::OpenSpacesOverview(Browser* browser) {
   browser->OpenURL(params, /*navigation_handle_callback=*/{});
 }
 
+void PrismSpaceWindowDelegate::FocusSpaceWindow(int space_id) {
+  BrowserWindowInterface* window = FindSpaceWindow(space_id);
+  if (!window) {
+    return;  // space not currently hosted in a visible window
+  }
+  window->GetWindow()->Show();
+  window->GetWindow()->Activate();
+}
+
 void PrismSpaceWindowDelegate::CycleToNextSpace() {
   auto* manager = SpaceManager::GetInstance();
   std::vector<int> order;

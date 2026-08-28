@@ -1,0 +1,147 @@
+Subject: [PATCH 0017] Prism: native brand chrome elements (recon §5)
+
+- Omnibox leading chip: LogiBricks mark + "Prism" pill at the left edge of
+  the location bar (LocationBarView leading decorations, leftmost).
+- Top-right toolbar button: LogiBricks mark with a dark circular badge
+  counting agent-controlled spaces (hidden at 0; 1s poll of SpaceManager,
+  same source and cadence as the Dock badge). The badge is composited into
+  the icon image (Button::OnPaint is final at this pin).
+- Both open the shared Prism agent menu (focus an agent space's window /
+  open the spaces overview / open the welcome page). The menu model+runner
+  are owned by the invoking view because RunMenuAt is blocking on macOS.
+- The mark is painted from the branding geometry (generate_icons.py), so it
+  adapts to toolbar/omnibox theme colors; no raster assets needed.
+
+All hunks anchor on pristine upstream lines (no stacking).
+
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+index fb181a6..05c9251 100644
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -1446,6 +1446,16 @@ static_library("ui") {
+       "//chrome/browser/prism/prism_onboarding_actions.mm",
+       "browser_tab_menu_model_delegate.cc",
+       "browser_tab_menu_model_delegate.h",
++      # Prism: brand chrome elements (recon §5) — omnibox chip, toolbar
++      # button with agent-count badge, shared agent menu + mark painter.
++      "//chrome/browser/ui/views/prism/prism_agent_menu.cc",
++      "//chrome/browser/ui/views/prism/prism_agent_menu.h",
++      "//chrome/browser/ui/views/prism/prism_brand_chip_view.cc",
++      "//chrome/browser/ui/views/prism/prism_brand_chip_view.h",
++      "//chrome/browser/ui/views/prism/prism_brand_mark.cc",
++      "//chrome/browser/ui/views/prism/prism_brand_mark.h",
++      "//chrome/browser/ui/views/prism/prism_toolbar_button.cc",
++      "//chrome/browser/ui/views/prism/prism_toolbar_button.h",
+       "browser_tab_restorer.cc",
+       "browser_tab_strip_model_delegate.cc",
+       "browser_tabrestore.cc",
+diff --git a/chrome/browser/ui/views/location_bar/location_bar_view.h b/chrome/browser/ui/views/location_bar/location_bar_view.h
+index f0c5338..4453bdc 100644
+--- a/chrome/browser/ui/views/location_bar/location_bar_view.h
++++ b/chrome/browser/ui/views/location_bar/location_bar_view.h
+@@ -54,6 +54,10 @@
+ #endif  // BUILDFLAG(OS_LEVEL_GEOLOCATION_PERMISSION_SUPPORTED)
+ 
+ class CommandUpdater;
++
++namespace prism {
++class PrismBrandChipView;
++}  // namespace prism
+ class ContentSettingBubbleModelDelegate;
+ class IntentChipButton;
+ class OmniboxController;
+@@ -568,6 +572,9 @@ class LocationBarView
+   // search icon, EV HTTPS bubble, etc.
+   raw_ptr<LocationIconView> location_icon_view_ = nullptr;
+ 
++  // Prism: brand chip at the very left edge of the location bar (recon §5).
++  raw_ptr<prism::PrismBrandChipView> brand_chip_view_ = nullptr;
++
+   // Views to show inline autocompletion when an IME is active.  In this case,
+   // we shouldn't change the text or selection inside the OmniboxView itself,
+   // since this will conflict with the IME's control over the text.  So instead
+diff --git a/chrome/browser/ui/views/location_bar/location_bar_view.cc b/chrome/browser/ui/views/location_bar/location_bar_view.cc
+index 0353e3f..2f5329d 100644
+--- a/chrome/browser/ui/views/location_bar/location_bar_view.cc
++++ b/chrome/browser/ui/views/location_bar/location_bar_view.cc
+@@ -88,6 +88,7 @@
+ #include "chrome/browser/ui/views/omnibox/omnibox_popup_webui_content.h"
+ #include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
+ #include "chrome/browser/ui/views/page_action/page_action_container_view.h"
++#include "chrome/browser/ui/views/prism/prism_brand_chip_view.h"
+ #include "chrome/browser/ui/views/page_action/page_action_icon_container.h"
+ #include "chrome/browser/ui/views/page_action/page_action_icon_controller.h"
+ #include "chrome/browser/ui/views/page_action/page_action_icon_params.h"
+@@ -340,6 +341,10 @@ void LocationBarView::Init() {
+   location_icon_view->set_drag_controller(this);
+   location_icon_view_ = AddChildView(std::move(location_icon_view));
+ 
++  // Prism: brand chip at the leading edge (laid out leftmost below).
++  brand_chip_view_ =
++      AddChildView(std::make_unique<prism::PrismBrandChipView>(browser_));
++
+   // Initialize the Omnibox view. browser_ can be nullptr on ChromeOS in the
+   // case of simple_web_view_dialog. Or it can be nulltpr on ChromeOS and on
+   // other desktop platforms in the case of presentation_receiver_window_view.
+@@ -912,6 +917,13 @@ void LocationBarView::Layout(PassKey) {
+       LayoutConstant::kLocationBarTrailingDecorationEdgePadding);
+ 
+   const int location_height = std::max(height() - (vertical_padding * 2), 0);
++
++  // Prism: the brand chip is always the leftmost decoration.
++  if (brand_chip_view_) {
++    leading_decorations.AddDecoration(vertical_padding, location_height, false,
++                                      0, /*intra_item_padding=*/6, icon_left,
++                                      brand_chip_view_);
++  }
+   // The largest fraction of the omnibox that can be taken by the EV or search
+   // label/chip.
+   const double kLeadingDecorationMaxFraction = 0.5;
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_view.h b/chrome/browser/ui/views/toolbar/toolbar_view.h
+index c2d82dc..f9ef693 100644
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.h
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.h
+@@ -47,6 +47,10 @@
+ 
+ class AvatarToolbarButton;
+ class AvatarToolbarButtonInterface;
++
++namespace prism {
++class PrismToolbarButton;
++}  // namespace prism
+ class BatterySaverButton;
+ class BrowserAppMenuButton;
+ class Browser;
+@@ -388,6 +392,9 @@ class ToolbarView : public views::AccessiblePaneView,
+   // `toolbar_webview_->GetPinnedActionsContainer()`.
+   raw_ptr<PinnedToolbarActions> pinned_toolbar_actions_ = nullptr;
+   raw_ptr<AvatarToolbarButton> avatar_ = nullptr;
++
++  // Prism: top-right brand button with the running-agents badge (recon §5).
++  raw_ptr<prism::PrismToolbarButton> prism_button_ = nullptr;
+   raw_ptr<MediaToolbarButtonView> media_button_ = nullptr;
+   raw_ptr<BrowserAppMenuButton> app_menu_button_ = nullptr;
+ 
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_view.cc b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+index 5a42610..d307cd3 100644
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.cc
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+@@ -80,6 +80,7 @@
+ #include "chrome/browser/ui/views/location_bar/star_view.h"
+ #include "chrome/browser/ui/views/location_bar/webui_location_bar.h"
+ #include "chrome/browser/ui/views/page_action/page_action_container_view.h"
++#include "chrome/browser/ui/views/prism/prism_toolbar_button.h"
+ #include "chrome/browser/ui/views/page_action/page_action_icon_container.h"
+ #include "chrome/browser/ui/views/page_action/page_action_icon_controller.h"
+ #include "chrome/browser/ui/views/page_action/page_action_view.h"
+@@ -586,6 +587,10 @@ void ToolbarView::Init() {
+     avatar_->SetVisible(show_avatar_toolbar_button);
+   }
+ 
++  // Prism: top-right brand button with the running-agents badge (recon §5).
++  prism_button_ = AddChildView(
++      std::make_unique<prism::PrismToolbarButton>(browser_view_->browser()));
++
+   overflow_button_ = AddChildView(std::make_unique<OverflowButton>());
+   overflow_button_->SetVisible(false);
+ 

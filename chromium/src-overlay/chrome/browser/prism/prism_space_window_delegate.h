@@ -50,6 +50,9 @@ class PrismSpaceWindowDelegate : public SpaceWindowDelegate {
   // Phase 5: user-facing space switching (View menu items / keyboard).
   // Opens chrome://prism-spaces in a new foreground tab of `browser`.
   void OpenSpacesOverview(Browser* browser);
+  // Raises the window hosting `space_id` (Show + Activate). No-op when the
+  // space has no tracked window. Used by the toolbar/omnibox agent menu.
+  void FocusSpaceWindow(int space_id);
   // Cycles focus through [the implicit default space = the user's main
   // browsing area] + the spaces by id, raising the matching window. The
   // default space maps to the first window that hosts no space.
