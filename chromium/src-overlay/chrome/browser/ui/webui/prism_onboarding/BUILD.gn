@@ -1,0 +1,26 @@
+# Copyright 2026 The Prism Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license.
+
+source_set("prism_onboarding") {
+  sources = [
+    "assets.gen.cc",
+    "prism_onboarding_ui.cc",
+    "prism_onboarding_ui.h",
+  ]
+
+  public_deps = [
+    "//base",
+    "//content/public/browser",
+  ]
+
+  deps = [
+    "//chrome/browser:browser_public_dependencies",
+    "//chrome/browser/importer",
+    "//chrome/browser/lifetime",
+    "//chrome/browser/prism:delegate_headers",
+    "//components/history/core/browser",
+    "//components/user_data_importer/common",
+    "//services/network/public/mojom",
+    "//sql",
+  ]
+}

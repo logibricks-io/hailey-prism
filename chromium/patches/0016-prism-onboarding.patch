@@ -1,0 +1,130 @@
+Subject: [PATCH 0016] Prism: chrome://prism-onboarding 4-step first-run flow
+
+Registers the new onboarding WebUI (src-overlay
+chrome/browser/ui/webui/prism_onboarding/) and points the first-run tab at
+it (chrome://prism-welcome stays reachable directly and keeps the fixture
+chrome.send handlers). The flow: splash -> pitch -> import wizard (drives
+the shared staged+live Chrome import extracted to
+chrome/browser/prism/prism_chrome_live_import.{h,cc}) -> finish (default
+browser, Add to Dock via dock::AddIcon, crash-report consent pref).
+
+Completion is recorded in the Local State pref prism.onboarding_completed
+(registered via prism::RegisterLocalStatePrefs from RegisterLocalState) and
+guards the first-run tab alongside the first-run sentinel.
+
+Stacking notes: the include hunk and the first-run retarget intentionally
+stack on 0009's added lines (apply/revert in series order); all other hunks
+anchor on pristine upstream lines.
+
+diff --git a/chrome/browser/ui/webui/chrome_web_ui_configs.cc b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
+index 3d05b03..ede81e8 100644
+--- a/chrome/browser/ui/webui/chrome_web_ui_configs.cc
++++ b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
+@@ -243,6 +243,7 @@
+     BUILDFLAG(IS_CHROMEOS)
+ #include "chrome/browser/ui/webui/skills/skills_ui.h"
+ #include "chrome/browser/ui/webui/prism_welcome/prism_welcome_ui.h"
++#include "chrome/browser/ui/webui/prism_onboarding/prism_onboarding_ui.h"
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+         // BUILDFLAG(IS_CHROMEOS)
+ 
+@@ -506,6 +507,9 @@ void RegisterChromeWebUIConfigs() {
+   map.AddWebUIConfig(std::make_unique<UnexportableKeysInternalsUIConfig>());
+ #endif  // BUILDFLAG(IS_MAC)
+ 
++  // Prism: chrome://prism-onboarding 4-step first-run flow.
++  map.AddWebUIConfig(std::make_unique<prism::PrismOnboardingUIConfig>());
++
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+     BUILDFLAG(IS_CHROMEOS)
+   map.AddWebUIConfig(std::make_unique<skills::SkillsUIConfig>());
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+index 2f3987e..fb181a6 100644
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -418,6 +418,7 @@ static_library("ui") {
+     "//chrome/browser/headless",
+     "//chrome/browser/history",
+     "//chrome/browser/history:impl",
++    "//chrome/browser/ui/webui/prism_onboarding",
+     "//chrome/browser/loader",
+     "//chrome/browser/media",
+     "//chrome/browser/media:impl",
+@@ -1437,6 +1438,12 @@ static_library("ui") {
+       "browser_manager_service.h",
+       "browser_manager_service_factory.cc",
+       "browser_manager_service_factory.h",
++      # Prism: shared live Chrome import + onboarding finish actions
++      # (mac-only).
++      "//chrome/browser/prism/prism_chrome_live_import.cc",
++      "//chrome/browser/prism/prism_chrome_live_import.h",
++      "//chrome/browser/prism/prism_onboarding_actions.h",
++      "//chrome/browser/prism/prism_onboarding_actions.mm",
+       "browser_tab_menu_model_delegate.cc",
+       "browser_tab_menu_model_delegate.h",
+       "browser_tab_restorer.cc",
+diff --git a/chrome/browser/ui/webui/BUILD.gn b/chrome/browser/ui/webui/BUILD.gn
+index 03b8f98..9c2862c 100644
+--- a/chrome/browser/ui/webui/BUILD.gn
++++ b/chrome/browser/ui/webui/BUILD.gn
+@@ -101,6 +101,7 @@ source_set("configs") {
+     "//components/lens:buildflags",
+     "//components/security_interstitials/content:security_interstitial_page",
+     "//components/webui/user_actions",
++    "//chrome/browser/ui/webui/prism_onboarding",
+     "//content/public/browser",
+     "//extensions/buildflags",
+     "//printing/buildflags",
+diff --git a/chrome/browser/chrome_browser_main.cc b/chrome/browser/chrome_browser_main.cc
+index ae1e4bb..7a28cae 100644
+--- a/chrome/browser/chrome_browser_main.cc
++++ b/chrome/browser/chrome_browser_main.cc
+@@ -63,6 +63,7 @@
+ #include "chrome/browser/downgrade/downgrade_manager_delegate_impl.h"  // nogncheck
+ #endif
+ #include "chrome/browser/prism/prism_chrome_importer.h"
++#include "chrome/browser/prism/prism_onboarding_actions.h"
+ #include "chrome/browser/profiles/profile_manager.h"
+ #include "chrome/browser/profiles/profile_manager_observer.h"
+ #include "chrome/browser/profiles/profiles_state.h"
+@@ -1279,12 +1280,14 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
+     if (!base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kApp) &&
+         !base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kAppId)) {
+       browser_creator_->AddFirstRunTabs(master_prefs_->new_tabs);
+-      // Prism: onboarding entry — chrome://prism-welcome offers importing
+-      // browsing data from the system Chrome/Safari/Firefox (skip is fully
+-      // side-effect free). Automation launches always carry a positional URL
+-      // or --no-first-run, so this only shows for real user launches.
+-      if (base::CommandLine::ForCurrentProcess()->GetArgs().empty()) {
+-        browser_creator_->AddFirstRunTabs({GURL("chrome://prism-welcome")});
++      // Prism: onboarding entry — chrome://prism-onboarding runs the 4-step
++      // first-run flow (splash / pitch / import / finish); chrome://prism-welcome
++      // stays reachable directly. Automation launches always carry a
++      // positional URL or --no-first-run, so this only shows for real user
++      // launches, and only until onboarding is completed.
++      if (base::CommandLine::ForCurrentProcess()->GetArgs().empty() &&
++          !prism::OnboardingCompleted()) {
++        browser_creator_->AddFirstRunTabs({GURL("chrome://prism-onboarding")});
+       }
+     }
+   }
+diff --git a/chrome/browser/prefs/browser_prefs.cc b/chrome/browser/prefs/browser_prefs.cc
+index 48394ef..4e9c238 100644
+--- a/chrome/browser/prefs/browser_prefs.cc
++++ b/chrome/browser/prefs/browser_prefs.cc
+@@ -61,6 +61,7 @@
+ #include "chrome/browser/prefs/chrome_pref_service_factory.h"
+ #include "chrome/browser/prefs/incognito_mode_prefs.h"
+ #include "chrome/browser/prefs/session_startup_pref.h"
++#include "chrome/browser/prism/prism_onboarding_actions.h"
+ #include "chrome/browser/preloading/prefetch/prefetch_service/prefetch_origin_decider.h"
+ #include "chrome/browser/preloading/prefetch/search_prefetch/search_prefetch_service.h"
+ #include "chrome/browser/preloading/preloading_prefs.h"
+@@ -1436,6 +1437,7 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
+   ProfileAttributesStorage::RegisterPrefs(registry);
+   ProfileNetworkContextService::RegisterLocalStatePrefs(registry);
+   profiles::RegisterPrefs(registry);
++  prism::RegisterLocalStatePrefs(registry);
+   feature_engagement::RegisterLocalStatePrefs(registry);
+ #if BUILDFLAG(IS_ANDROID)
+   PushMessagingServiceImpl::RegisterPrefs(registry);
