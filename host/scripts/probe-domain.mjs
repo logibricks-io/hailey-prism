@@ -444,8 +444,9 @@ async function runPhase5Suite(cdp) {
     "Array.from(document.querySelectorAll('#wall .card .name')).map((n) => n.textContent).join(',')");
   check("phase5: cards carry the space names",
     names.includes("phase5-alpha") && names.includes("phase5-beta"), names);
-  const countText = await evalIn("document.getElementById('count').textContent");
-  check("phase5: header shows the space count", countText.trim() === "2 spaces", countText);
+  const countText = await evalIn(
+    "document.getElementById('captionText').textContent");
+  check("phase5: header shows the space count", countText.trim() === "2 Spaces", countText);
 
   // Thumbnails: the card <img> for alpha's space loads a real capture of its
   // example.com tab (the 1x1 transparent fallback has naturalWidth 1). fetch()

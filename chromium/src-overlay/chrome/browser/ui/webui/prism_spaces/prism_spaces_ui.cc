@@ -37,62 +37,131 @@ namespace {
 // through chrome.send("spaceAction"); thumbnails are captured on demand from
 // the space's active tab and served from thumb/<id>.png.
 constexpr char kPageHtml[] = R"HTML(<!doctype html>
-<html><head><meta charset="utf-8"><title>Prism Spaces</title>
+<html lang="en"><head><meta charset="utf-8"><title>Prism Spaces</title>
 <style>
-  :root { color-scheme: dark; }
+  /* Design tokens mirror chrome://prism-welcome (dark + blue accent). */
+  :root {
+    color-scheme: dark;
+    --bg-1: #1f1f1f; --bg-3: #171717; --fg-1: #2e2e2e; --fg-3: #424242;
+    --text-1: #ffffffe6; --text-2: #ffffffb3; --text-3: #ffffff7a;
+    --text-4: #ffffff3d;
+    --accent: #7eb3fe;
+  }
   * { box-sizing: border-box; }
-  body { font-family: -apple-system, system-ui, sans-serif; background: #17141f;
-         color: #ece9f4; margin: 0; padding: 28px 32px; }
-  header { display: flex; align-items: baseline; gap: 14px; margin-bottom: 20px; }
-  h1 { font-size: 20px; font-weight: 600; margin: 0; }
-  h1 .mark { color: #b69cff; }
-  .count { color: #a79fbd; font-size: 13px; }
-  .hint { color: #6f6784; font-size: 12px; }
-  header .spacer { flex: 1; }
-  #wall { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-          gap: 18px; }
-  .card { background: #211c2e; border: 1px solid #352c4a; border-radius: 14px;
-          overflow: hidden; cursor: pointer; transition: border-color .15s,
-          transform .15s; }
-  .card:hover { border-color: #5b4a86; transform: translateY(-2px); }
-  .card.focused { border-color: #b69cff; box-shadow: 0 0 0 1px #b69cff; }
-  .thumb { position: relative; aspect-ratio: 16 / 10; background: #2a2340;
+  [hidden] { display: none !important; }
+  body { font-family: -apple-system, system-ui, sans-serif;
+         background: var(--bg-3); color: var(--text-1);
+         margin: 0; padding: 22px 32px 88px; animation: page-in .25s ease; }
+  @keyframes page-in { from { opacity: 0; } }
+  @keyframes card-in { from { opacity: 0; transform: translateY(10px)
+                       scale(.97); } }
+
+  header { display: flex; align-items: center; margin-bottom: 22px; }
+  header .brand { display: inline-flex; align-items: center; gap: 8px;
+                  color: var(--text-2); font-weight: 600; font-size: 14px; }
+  header .side { flex: 1; }
+  /* recon §4: "N Space(s) ⌄" sits top center */
+  #spacesCaption { position: relative; margin: 0 auto; }
+  #captionBtn { display: inline-flex; align-items: center; gap: 7px;
+                background: none; border: 0; color: var(--text-1);
+                font-size: 15px; font-weight: 600; cursor: pointer;
+                padding: 6px 12px; border-radius: 999px; }
+  #captionBtn:hover { background: #ffffff0f; }
+  #captionBtn .chev { color: var(--text-3); font-size: 11px; }
+  #captionMenu { position: absolute; top: calc(100% + 6px); left: 50%;
+                 transform: translateX(-50%); min-width: 220px; z-index: 30;
+                 background: var(--fg-1); border: 1px solid #ffffff14;
+                 border-radius: 14px; padding: 6px; display: none;
+                 box-shadow: 0 10px 36px #00000070; }
+  #captionMenu.open { display: block; }
+  #captionMenu button { display: flex; width: 100%; align-items: center;
+                        gap: 10px; border: 0; background: none;
+                        color: var(--text-1); font-size: 13.5px;
+                        padding: 8px 10px; border-radius: 9px;
+                        cursor: pointer; text-align: left; }
+  #captionMenu button:hover { background: #ffffff10; }
+  #captionMenu .sub { margin-left: auto; color: var(--text-3);
+                      font-size: 11.5px; }
+
+  #wall { display: grid; grid-template-columns: repeat(auto-fill,
+          minmax(300px, 1fr)); gap: 18px; }
+  .card { background: var(--bg-1); border: 1px solid #ffffff0d;
+          border-radius: 16px; overflow: hidden; cursor: pointer;
+          transition: border-color .15s, box-shadow .15s, transform .15s;
+          animation: card-in .28s cubic-bezier(.2,.9,.3,1.2) backwards;
+          animation-delay: calc(var(--i, 0) * 45ms); }
+  .card:hover { border-color: #ffffff26; transform: translateY(-2px); }
+  /* recon §4: selected space gets a blue border */
+  .card.focused { border-color: var(--accent);
+                  box-shadow: 0 0 0 1.5px var(--accent); }
+  .thumb { position: relative; aspect-ratio: 16 / 10; background: #101010;
            display: flex; align-items: center; justify-content: center; }
   .thumb img { position: absolute; inset: 0; width: 100%; height: 100%;
                object-fit: cover; object-position: top; }
-  .thumb .initial { font-size: 42px; font-weight: 700; color: #5b4a86; }
+  .thumb .initial { font-size: 42px; font-weight: 700; color: #ffffff2e; }
+  /* recon §4: left-bottom "Space" label, right-bottom muted watermark */
+  .thumb .space-label { position: absolute; left: 10px; bottom: 10px;
+           font-size: 11.5px; font-weight: 600; color: var(--text-1);
+           background: #0000008c; border-radius: 999px; padding: 3px 10px;
+           backdrop-filter: blur(8px); }
+  .thumb .watermark { position: absolute; right: 10px; bottom: 10px;
+           display: inline-flex; align-items: center; gap: 5px;
+           color: var(--text-3); font-size: 11px; opacity: .8; }
   .meta { padding: 12px 14px 14px; }
   .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .name { font-size: 14.5px; font-weight: 600; }
   .chip { font-size: 11px; padding: 2px 8px; border-radius: 999px;
-          border: 1px solid #453a63; color: #a79fbd; }
+          border: 1px solid #ffffff1f; color: var(--text-3); }
   .chip.agent { color: #8fd3a5; border-color: #2f5d43; }
   .chip.agentDelegatedToUser { color: #ffb86b; border-color: #6b4a2a; }
-  .chip.focused { color: #b69cff; border-color: #b69cff; }
+  .chip.focused { color: var(--accent); border-color: var(--accent); }
   .chip.running { color: #8fd3a5; border-color: #2f5d43; }
-  .state { margin-top: 6px; color: #cfc8e3; font-size: 12.5px; min-height: 15px; }
-  .state:empty::before { content: "\2014"; color: #6f6784; }
+  .state { margin-top: 6px; color: var(--text-2); font-size: 12.5px;
+           min-height: 15px; }
+  .state:empty::before { content: "\2014"; color: var(--text-4); }
   .actions { margin-top: 10px; display: flex; gap: 8px; }
-  button { background: #322948; color: #ece9f4; border: 1px solid #453a63;
+  button { background: #ffffff0f; color: var(--text-1); border: 0;
            border-radius: 8px; padding: 5px 12px; font-size: 12.5px;
-           cursor: pointer; }
-  button:hover { background: #3d3260; }
-  button.danger:hover { background: #5d2f3d; border-color: #7a3d4f; }
+           cursor: pointer; font-family: inherit; }
+  button:hover { background: #ffffff1a; }
+  button.danger:hover { background: #5d2f3d; }
+  /* recon §4: the "+" create card */
   .newspace { display: flex; align-items: center; justify-content: center;
-              min-height: 220px; color: #a79fbd; font-size: 14px;
-              border: 1px dashed #453a63; background: transparent; }
-  .newspace:hover { color: #ece9f4; border-color: #b69cff; }
-  .newspace .plus { font-size: 30px; color: #b69cff; margin-right: 8px; }
-  .empty { color: #a79fbd; }
+              gap: 8px; min-height: 220px; color: var(--text-3);
+              font-size: 14px; border: 1.5px dashed #ffffff21;
+              background: transparent; }
+  .newspace:hover { color: var(--text-1); border-color: var(--accent); }
+  .newspace .plus { font-size: 26px; color: var(--accent); }
+  .empty { color: var(--text-3); }
+
+  /* recon §4: first-run ⌥S hint bar */
+  #hintBar { position: fixed; left: 50%; bottom: 22px;
+             transform: translateX(-50%); display: flex; align-items: center;
+             gap: 12px; background: var(--fg-1); border: 1px solid #ffffff1a;
+             border-radius: 999px; padding: 10px 12px 10px 18px;
+             color: var(--text-2); font-size: 13px; z-index: 40;
+             box-shadow: 0 10px 34px #00000066;
+             animation: card-in .3s .3s cubic-bezier(.2,.9,.3,1.2) backwards; }
+  #hintBar kbd { color: var(--text-1); font-family: inherit; font-weight: 600; }
+  #hintBar button { border-radius: 50%; padding: 3px 8px;
+                    color: var(--text-3); }
 </style></head><body>
 <header>
-  <h1><span class="mark">Prism</span> Spaces</h1>
-  <span class="count" id="count"></span>
-  <span class="hint">&#x2325;S cycles spaces &middot; &#x21E7;&#x2318;S opens this wall</span>
-  <span class="spacer"></span>
-  <button id="deleteAll" class="danger">Delete all</button>
+  <span class="brand"><svg width="18" height="18" viewBox="0 0 576 576" fill="none" aria-hidden="true"><rect x="0" y="0" width="158" height="158" rx="21" fill="#FBFBF9"/><rect x="0" y="209" width="158" height="158" rx="21" fill="#FBFBF9"/><rect x="0" y="418" width="158" height="158" rx="21" fill="#FBFBF9"/><rect x="209" y="418" width="158" height="158" rx="21" fill="#FBFBF9"/><rect x="418" y="418" width="158" height="158" rx="21" fill="#FBFBF9"/><circle cx="497" cy="79" r="71" fill="#C87858"/></svg>Prism</span>
+  <span class="side"></span>
+  <div id="spacesCaption">
+    <button type="button" id="captionBtn" aria-haspopup="true" aria-expanded="false">
+      <span id="captionText">Spaces</span><span class="chev">&#9662;</span>
+    </button>
+    <div id="captionMenu" role="menu"></div>
+  </div>
+  <span class="side" style="text-align:right"><button id="deleteAll" class="danger">Delete all</button></span>
 </header>
 <div id="wall"><div class="empty">Loading&hellip;</div></div>
+<div id="hintBar" hidden>
+  <span>Hold <kbd>&#x2325;</kbd> and press <kbd>S</kbd> repeatedly to quick-switch Spaces.</span>
+  <button type="button" id="hintDismiss" aria-label="Dismiss hint">&#10005;</button>
+</div>
 <script src="app.js"></script></body></html>)HTML";
 
 constexpr char kAppJs[] = R"JS(let refreshCounter = 0;
@@ -113,17 +182,60 @@ function ownershipLabel(space) {
   if (space.ownership === "agentDelegatedToUser") return "Delegated to you";
   return "Yours";
 }
+
+// ---- top-center "N Space(s) ⌄" caption + dropdown (recon §4) ----
+const captionBtn = document.getElementById("captionBtn");
+const captionMenu = document.getElementById("captionMenu");
+captionBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const open = captionMenu.classList.toggle("open");
+  captionBtn.setAttribute("aria-expanded", String(open));
+});
+document.addEventListener("click", () => captionMenu.classList.remove("open"));
+
+function buildCaptionMenu(spaces, focused) {
+  captionMenu.replaceChildren();
+  for (const space of spaces) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.setAttribute("role", "menuitem");
+    span(btn, "", space.name || "Space");
+    const sub = space.id === focused ? "Focused"
+              : space.ownership === "agent" ? "Agent" : "";
+    if (sub) span(btn, "sub", sub);
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      captionMenu.classList.remove("open");
+      action(space.id, "focus");
+    });
+    captionMenu.appendChild(btn);
+  }
+}
+
+// ---- first-run ⌥S hint bar (dismissal persists per profile) ----
+const hintBar = document.getElementById("hintBar");
+try {
+  if (!localStorage.getItem("prismSpacesHintDismissed")) hintBar.hidden = false;
+} catch (e) { /* storage unavailable: show the hint */ hintBar.hidden = false; }
+document.getElementById("hintDismiss").addEventListener("click", () => {
+  hintBar.hidden = true;
+  try { localStorage.setItem("prismSpacesHintDismissed", "1"); } catch (e) {}
+});
+
 function onData(payloadJson) {
   const data = JSON.parse(payloadJson);
   const spaces = data.spaces || [];
-  document.getElementById("count").textContent =
-      spaces.length ? spaces.length + " space" + (spaces.length > 1 ? "s" : "")
-                    : "";
+  document.getElementById("captionText").textContent =
+      spaces.length + " Space" + (spaces.length === 1 ? "" : "s");
+  buildCaptionMenu(spaces, data.focused);
+
   const wall = document.getElementById("wall");
   wall.replaceChildren();
+  let i = 0;
   for (const space of spaces) {
     const card = document.createElement("div");
     card.className = "card" + (space.id === data.focused ? " focused" : "");
+    card.style.setProperty("--i", i++);
     card.dataset.space = space.id;
     card.addEventListener("click", () => action(space.id, "focus"));
 
@@ -139,6 +251,15 @@ function onData(payloadJson) {
       img.alt = "";
       thumb.appendChild(img);
     }
+    // recon §4: left-bottom "Space" label + right-bottom muted watermark
+    const label = document.createElement("span");
+    label.className = "space-label";
+    label.textContent = "Space";
+    thumb.appendChild(label);
+    const wm = document.createElement("span");
+    wm.className = "watermark";
+    wm.textContent = "Your Prism";
+    thumb.appendChild(wm);
     card.appendChild(thumb);
 
     const meta = document.createElement("div");
@@ -164,9 +285,9 @@ function onData(payloadJson) {
     if (space.ownership === "agentDelegatedToUser")
       specs.push(["takeover", "Return to agent"]);
     specs.push(["close", "Close"]);
-    for (const [kind, label] of specs) {
+    for (const [kind, label2] of specs) {
       const btn = document.createElement("button");
-      btn.textContent = label;
+      btn.textContent = label2;
       if (kind === "close") btn.className = "danger";
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -181,11 +302,12 @@ function onData(payloadJson) {
 
   const add = document.createElement("div");
   add.className = "card newspace";
+  add.style.setProperty("--i", i);
   const plus = document.createElement("span");
   plus.className = "plus";
   plus.textContent = "+";
   add.appendChild(plus);
-  add.appendChild(document.createTextNode(" New space"));
+  add.appendChild(document.createTextNode(" Create a new Space"));
   add.addEventListener("click", () => action(0, "create"));
   wall.appendChild(add);
 }

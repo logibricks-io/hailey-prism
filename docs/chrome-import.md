@@ -1,4 +1,4 @@
-# Chrome data import (chrome://prism-welcome → "Import from Chrome")
+# Chrome data import (chrome://prism-onboarding import step; chrome://prism-welcome handlers)
 
 Phase 6: full Chrome profile migration so agents inherit the user's login
 state ("say yes once, and the agent works with your existing logins").
@@ -58,7 +58,9 @@ Explicitly NOT done:
 
 - The import **replaces** the Prism keychain item's value with Chrome's seed.
   Anything Prism encrypted before the import becomes undecryptable. The
-  import is designed for first-run fresh profiles; the welcome page says so.
+  import is designed for first-run fresh profiles; it is offered from the
+  onboarding import step (chrome://prism-onboarding) and remains callable on
+  chrome://prism-welcome (the fixture test drives that page directly).
 - Between the keychain write and the restart, the running browser still holds
   the old derived key in memory; any data encrypted in that window would also
   be orphaned (seconds-long window on a fresh profile).
@@ -75,7 +77,8 @@ written last, so a partial stage never applies) and
 `prism::ApplyStagedChromeImport()` — called from
 `ChromeBrowserMainParts::PreMainMessageLoopRunImpl` before any profile
 service opens those files — moves the staged files into `Default/`. The
-welcome page's "Restart Prism to finish" button drives `chrome::AttemptRestart()`.
+onboarding finish step drives `chrome::AttemptRestart()` when an import was
+  staged (the button reads "Restart & open Prism").
 
 ## Graceful degradation
 
