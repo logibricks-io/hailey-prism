@@ -1,0 +1,1 @@
+.ProseMirror p[data-placeholder]{position:relative}.ProseMirror p[data-placeholder]:before{position:absolute;top:0;left:0;color:var(--text-4);white-space:nowrap;pointer-events:none;-webkit-user-select:none;user-select:none;content:attr(data-placeholder)}

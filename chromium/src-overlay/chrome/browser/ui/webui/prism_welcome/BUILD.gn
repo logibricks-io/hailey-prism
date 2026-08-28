@@ -3,6 +3,7 @@
 
 source_set("prism_welcome") {
   sources = [
+    "assets.gen.cc",
     "prism_welcome_ui.cc",
     "prism_welcome_ui.h",
   ]
@@ -19,6 +20,7 @@ source_set("prism_welcome") {
     "//chrome/browser/prism:delegate_headers",
     "//components/history/core/browser",
     "//components/user_data_importer/common",
+    "//services/network/public/mojom",
     "//sql",
   ]
 }

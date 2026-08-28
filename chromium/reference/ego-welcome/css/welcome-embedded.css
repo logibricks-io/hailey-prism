@@ -1,0 +1,50 @@
+
+				body { background: var(--bg-1); }
+
+				.welcome-aboard-cards-viewport {
+					container-type: inline-size;
+				}
+
+				.welcome-aboard-cards-row {
+					display: flex;
+					flex-wrap: wrap;
+					align-items: center;
+					justify-content: center;
+					gap: 12px;
+				}
+
+				@media (min-width: 1264px) {
+					.welcome-aboard-cards-stage {
+						--welcome-aboard-cards-scale: min(1, calc(100cqw / 1440px));
+						position: relative;
+						width: min(100%, 1440px);
+						max-width: none;
+						aspect-ratio: 1440 / 480;
+					}
+
+					.welcome-aboard-cards-row {
+						position: absolute;
+						top: 0;
+						left: 50%;
+						width: 1440px;
+						flex-wrap: nowrap;
+						transform: translateX(-50%) scale(var(--welcome-aboard-cards-scale));
+						transform-origin: top center;
+					}
+				}
+
+				@container (min-width: 1440px) {
+					.welcome-aboard-cards-stage {
+						position: static;
+						width: 100%;
+						max-width: 1440px;
+						aspect-ratio: auto;
+					}
+
+					.welcome-aboard-cards-row {
+						position: static;
+						width: 100%;
+						transform: none;
+					}
+				}
+			
