@@ -26,6 +26,9 @@ class InfoBar;
 
 namespace prism {
 
+// Defined in the .cc: per-wall destruction guard for the mode registry.
+class SpacesModeWallGuard;
+
 // Chrome-side implementation of SpaceWindowDelegate (Phase 4): opens and
 // tracks one visible Browser window per space, hosts the space's windowless
 // agent tabs in it, pins chrome://prism-spaces as the window's identity tab,
@@ -88,6 +91,11 @@ class PrismSpaceWindowDelegate : public SpaceWindowDelegate {
                           content::WebContents* wall_wc,
                           SpacesModeExitCallback exit_cb);
   void UnregisterSpacesMode(content::WebContents* wall_wc);
+  // The wall's WebContents was destroyed while registered (window closed
+  // with the mode active, teardown-ordering changes): drop the registry
+  // entry so the map never keys on a destroyed WebContents. Called by the
+  // per-wall destruction guard (see the .cc).
+  void OnSpacesModeWallDestroyed(content::WebContents* wall_wc);
   bool IsSpacesModeWebContents(const content::WebContents* wc) const;
   // When the mode was last shown for `wc` (drives the wall's enter replay;
   // null Time when `wc` is not a mode wall).
@@ -125,6 +133,11 @@ class PrismSpaceWindowDelegate : public SpaceWindowDelegate {
   std::map<int, TrackedBanner> banners_;
   // Active spaces-mode presentations, keyed by the wall WebContents.
   std::map<raw_ptr<content::WebContents>, SpacesModeEntry> spaces_modes_;
+  // One destruction guard per registered wall WebContents: erases the
+  // spaces_modes_ entry if the WebContents dies while registered, so a
+  // stale key can never survive into a later query.
+  std::map<raw_ptr<content::WebContents>, std::unique_ptr<SpacesModeWallGuard>>
+      spaces_mode_guards_;
   // Spaces whose banner the user closed with the X; suppressed until the
   // ownership leaves kAgent (then re-enters).
   std::set<int> dismissed_banners_;

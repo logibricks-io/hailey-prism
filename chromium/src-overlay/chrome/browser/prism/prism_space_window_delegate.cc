@@ -27,6 +27,7 @@
 #include "components/infobars/core/infobar.h"
 #include "components/infobars/core/infobar_manager.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "prism/browser/spaces/space_manager.h"
 #include "cc/paint/paint_flags.h"
 #include "ui/base/base_window.h"
@@ -117,6 +118,27 @@ bool WebContentsHostedAnywhere(content::WebContents* wc) {
 }
 
 }  // namespace
+
+// Watches a registered spaces-mode wall WebContents and unregisters it on
+// destruction (window closed with the mode active, teardown-ordering
+// changes): the mode registry may never key on a destroyed WebContents.
+class SpacesModeWallGuard : public content::WebContentsObserver {
+ public:
+  SpacesModeWallGuard(PrismSpaceWindowDelegate* delegate,
+                      content::WebContents* wall)
+      : content::WebContentsObserver(wall), delegate_(delegate), wall_(wall) {}
+
+  void WebContentsDestroyed() override {
+    // `delegate_` is process-lifetime. The call erases this guard from the
+    // delegate's map (destroying this object), so nothing may touch members
+    // afterwards.
+    delegate_->OnSpacesModeWallDestroyed(wall_);
+  }
+
+ private:
+  const raw_ptr<PrismSpaceWindowDelegate> delegate_;
+  const raw_ptr<content::WebContents> wall_;
+};
 
 PrismSpaceWindowDelegate::PrismSpaceWindowDelegate() {
   agent_surface_timer_.Start(
@@ -224,7 +246,17 @@ int PrismSpaceWindowDelegate::SpaceIdForWebContents(content::WebContents* wc) {
   if (!wc) {
     return 0;
   }
+  // Snapshot the ids first: FindSpaceWindow prunes closed windows from
+  // windows_, and erasing the entry under a live range-for iterator walks a
+  // freed map node — the wall's poll can land in the window between a space
+  // window closing and the 1s reconcile tick, and the poisoned-node read
+  // was a field SIGSEGV (EXC_BAD_ACCESS at 0xcdcdcdcd).
+  std::vector<int> ids;
+  ids.reserve(windows_.size());
   for (const auto& [space_id, unused] : windows_) {
+    ids.push_back(space_id);
+  }
+  for (const int space_id : ids) {
     BrowserWindowInterface* window = FindSpaceWindow(space_id);
     if (!window) {
       continue;
@@ -279,11 +311,21 @@ void PrismSpaceWindowDelegate::RegisterSpacesMode(
     return;
   }
   spaces_modes_[wall_wc] = {window, std::move(exit_cb), base::Time::Now()};
+  // (Re-)registering the same wall keeps a single destruction guard.
+  spaces_mode_guards_[wall_wc] =
+      std::make_unique<SpacesModeWallGuard>(this, wall_wc);
 }
 
 void PrismSpaceWindowDelegate::UnregisterSpacesMode(
     content::WebContents* wall_wc) {
   spaces_modes_.erase(wall_wc);
+  spaces_mode_guards_.erase(wall_wc);
+}
+
+void PrismSpaceWindowDelegate::OnSpacesModeWallDestroyed(
+    content::WebContents* wall_wc) {
+  spaces_modes_.erase(wall_wc);
+  spaces_mode_guards_.erase(wall_wc);
 }
 
 bool PrismSpaceWindowDelegate::IsSpacesModeWebContents(

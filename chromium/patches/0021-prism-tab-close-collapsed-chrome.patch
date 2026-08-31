@@ -1,0 +1,39 @@
+Subject: [PATCH 0021] Prism: no abort closing a tab with the spaces-mode
+ chrome collapsed
+
+GetAvailableWidthForTabContainer() falls back to
+parent()->GetAvailableSize(this).width().value() when no width callback is
+installed. In the spaces window mode (patch 0020) the tab strip's chrome
+is collapsed, the parent produces no available size (nullopt), and
+std::optional::value() on it aborts the browser process under the
+hardened libc++ (_LIBCPP_HARDENING_MODE_EXTENSIVE ->
+__libcpp_verbose_abort). Reachable by closing a tab mid-mode: window
+close, Cmd+W, or CDP Target.closeTarget (TabStrip::RemoveTabAt ->
+StartRemoveTabAnimation -> GetAvailableWidthForTabContainer).
+
+Fall back to the container's current width: the remove animation runs at
+the frozen width, which is invisible while the mode is active anyway.
+
+diff --git a/chrome/browser/ui/views/tabs/tab_container_impl.cc b/chrome/browser/ui/views/tabs/tab_container_impl.cc
+index b3cef86166..8cd6b5f364 100644
+--- a/chrome/browser/ui/views/tabs/tab_container_impl.cc
++++ b/chrome/browser/ui/views/tabs/tab_container_impl.cc
+@@ -694,9 +694,15 @@ void TabContainerImpl::CompleteAnimationAndLayout() {
+ int TabContainerImpl::GetAvailableWidthForTabContainer() const {
+   // Falls back to views::View::GetAvailableSize() when
+   // `available_width_callback_` is not defined.
+-  return available_width_callback_
+-             ? available_width_callback_.Run()
+-             : parent()->GetAvailableSize(this).width().value();
++  if (available_width_callback_) {
++    return available_width_callback_.Run();
++  }
++  // Prism (spaces window mode, patch 0021): with the chrome collapsed the
++  // parent cannot produce an available size, and .value() on the nullopt
++  // aborts under the hardened libc++ when a tab is closed mid-mode (window
++  // close, ⌘W, CDP Target.closeTarget). Run the remove animation at the
++  // frozen current width instead — the strip is invisible anyway.
++  return parent()->GetAvailableSize(this).width().value_or(width());
+ }
+ 
+ void TabContainerImpl::EnterTabClosingMode(std::optional<int> override_width,

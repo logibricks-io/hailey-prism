@@ -35,6 +35,25 @@ is needed even from a cold machine state.
 The same suite can also be launched from the package with
 `cd package/prism-browser && npm run e2e` — identical code path.
 
+## Spaces-mode crash stress
+
+`spaces-mode-stress.mjs` is a separate macOS-only crash-regression driver for
+the window-level spaces mode (not part of the acceptance suite). Each round
+enters the mode, clicks a card (exit+focus), re-enters, closes the space
+window and immediately polls `querySpaces` (the poll-vs-prune race that
+produced the field SIGSEGV in `SpaceIdForWebContents`), then fires rapid
+enter/exit toggles — asserting the browser survives every phase:
+
+```bash
+node e2e/spaces-mode-stress.mjs \
+  --browser ~/chromium/prism/src/out/Prism-arm64/Prism.app/Contents/MacOS/Prism \
+  --rounds 10
+```
+
+It launches the given binary on a throwaway offscreen profile and drives the
+View menu via System Events, so it needs accessibility permission for the
+host terminal.
+
 ## Environment knobs
 
 | Variable | Purpose |
