@@ -62,6 +62,13 @@ class PrismSpaceWindowDelegate : public SpaceWindowDelegate {
   // Inverse of the windows_ map: the space tracked to `window`, or 0 for the
   // implicit default space (window hosts no task space).
   int SpaceIdForWindow(const BrowserWindowInterface* window) const;
+  // The window hosting the implicit default space: the first normal browser
+  // window not tracked to a task space (recon §8 — the default browsing
+  // context is a first-class wall card).
+  BrowserWindowInterface* DefaultSpaceWindow() const;
+  // The default space window's active tab (nullptr when there is none) —
+  // the default wall card's thumbnail source.
+  content::WebContents* ActiveTabForDefaultSpace() const;
   // Raises the window hosting `space_id` (Show + Activate). No-op when the
   // space has no tracked window. Used by the toolbar/omnibox agent menu.
   void FocusSpaceWindow(int space_id);
@@ -82,6 +89,9 @@ class PrismSpaceWindowDelegate : public SpaceWindowDelegate {
                           SpacesModeExitCallback exit_cb);
   void UnregisterSpacesMode(content::WebContents* wall_wc);
   bool IsSpacesModeWebContents(const content::WebContents* wc) const;
+  // When the mode was last shown for `wc` (drives the wall's enter replay;
+  // null Time when `wc` is not a mode wall).
+  base::Time SpacesModeShownAt(const content::WebContents* wc) const;
   // The space the mode's window was showing when the mode opened (0 =
   // default space), for the dashboard's "current" card.
   int SpaceIdForModeWebContents(content::WebContents* wc);
@@ -108,6 +118,7 @@ class PrismSpaceWindowDelegate : public SpaceWindowDelegate {
   struct SpacesModeEntry {
     raw_ptr<BrowserWindowInterface> window;
     SpacesModeExitCallback exit;
+    base::Time shown_at;
   };
 
   std::map<int, raw_ptr<BrowserWindowInterface>> windows_;

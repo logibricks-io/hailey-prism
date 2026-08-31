@@ -80,7 +80,8 @@ void PrismSpacesCaptionButton::OnThemeChanged() {
 }
 
 void PrismSpacesCaptionButton::RefreshText() {
-  const size_t count = SpaceManager::GetInstance()->List().size();
+  // recon §8: the implicit default browsing context counts as a space.
+  const size_t count = SpaceManager::GetInstance()->List().size() + 1;
   SetText(base::UTF8ToUTF16(std::to_string(count) + " Space" +
                             (count == 1 ? "" : "s") + " ⌄"));
 }

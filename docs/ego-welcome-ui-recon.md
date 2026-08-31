@@ -108,3 +108,18 @@ backdrop dim, hint bar) is the gap.
 - **Watermark is dynamic**: fresh profile shows "Your ego"; the user's signed-in machine shows "LogiBricks.AI Agents EGO" — i.e. `<account/display name> Agents EGO` with a "Your ego" fallback. Prism equivalent: `<display name> Agents Prism`, fallback "Your Prism".
 - **Dashboard layout (1920×1080 reference)**: cards sit near the top (row starts ≈8% from top), uniform card size, ~40px gaps; selected/current space card has a blue border, others thin gray; under each card: left = "Space" label (agent cards: blue "Running" chip + task name), right = watermark; top center "N Spaces ⌄" dropdown; trailing "+" dashed card; bottom-center hint bar with keyboard icon ("Hold ⌥ and press S repeatedly to quick-switch Spaces."); corner badge stays visible while in dashboard; window traffic lights visible top-left.
 - **Open/close animation (~0.5–0.7s, ease-out/spring)**: on trigger, the live page content lifts slightly (translateY) and scales down into its card slot with a crossfade; the other cards stagger/slide in from the right; the "N Spaces ⌄" caption and the hint bar fade in. The agent space card's live content pops in right after the transition settles. Reverse animation when a card is clicked to open that space.
+
+## 8. Enter-animation frame analysis (2026-08-31, ego video vs Prism window-capture)
+
+ego's enter animation (from the user's 1080p recording, frame-sampled):
+1. The ENTIRE window content (page + browser chrome) lifts vertically (~5-10% of height) with a short motion ghost/crossfade.
+2. The content scales down into the LEFT card slot while the dark dashboard backdrop fades in; the top row morphs (tab strip fades out as the "N Spaces ⌄" caption fades in) — no jump cut.
+3. The other cards (agent space, "+") are present almost immediately with a subtle fade/rise — they do NOT travel far from the right.
+4. Caption + hint bar fade in during the second half; the agent card's live content pops in after settle. Total ≈0.6-0.8s single ease-out.
+5. The current browsing window is ALWAYS a card ("Space") — ego counts the implicit default browsing context as a space ("1 Space" with nothing else running).
+
+Prism gaps found by window-capture (screencapture -l, 10fps):
+- Entering from the default (non-agent) window shows "0 Spaces" and no shrink animation at all — the current content just disappears, because the implicit default space has no wall card. This is the user's #1 complaint.
+- Chrome collapse (toolbar/tab strip hide) reads as a jump cut relative to the wall appearing.
+- Non-current cards stagger in with too much right travel vs ego's subtle in-place fade.
+Fix direction: default space becomes a first-class wall card ("Space", live thumbnail, counted in the caption); the FLIP lift+shrink runs from EVERY entry path; choreograph the top-row crossfade with the shrink; reduce non-current card travel to a subtle rise/fade with ~40-60ms stagger.

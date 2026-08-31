@@ -32,6 +32,10 @@
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/common/url_constants.h"
 #include "prism/browser/spaces/space_manager.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "third_party/skia/include/core/SkCanvas.h"
+#include "third_party/skia/include/core/SkImage.h"
+#include "ui/gfx/codec/png_codec.h"
 
 namespace prism {
 
@@ -59,12 +63,16 @@ constexpr char kPageHtml[] = R"HTML(<!doctype html>
          background: var(--bg-3); color: var(--text-1);
          margin: 0; padding: 24px 60px 88px; }
   /* recon §7/§8 enter-exit motion (~0.5-0.7s ease-out/spring) */
-  @keyframes card-in-right { from { opacity: 0;
-                             transform: translateX(64px) scale(.98); } }
+  /* recon §8: non-current cards are present almost immediately — subtle
+     rise/fade, ~50ms stagger, no long right travel */
+  @keyframes card-in-calm { from { opacity: 0; transform: translateY(10px); } }
   @keyframes fade-in { from { opacity: 0; } }
   @keyframes thumb-pop { from { opacity: 0; transform: scale(.92); } }
-  .item.enter { animation: card-in-right .55s cubic-bezier(.2,.8,.25,1)
+  .item.enter { animation: card-in-calm .45s cubic-bezier(.2,.8,.25,1)
                 backwards; animation-delay: var(--d, 0ms); }
+  #fxBackdrop { position: fixed; inset: 0; z-index: 99; background: #171717;
+                opacity: 0; pointer-events: none;
+                transition: opacity .25s ease; }
   header.enter { animation: fade-in .4s ease .25s backwards; }
   #hintBar.enter { animation: fade-in .4s ease .35s backwards; }
   .thumb img.pop { animation: thumb-pop .3s cubic-bezier(.2,.9,.3,1.15)
@@ -193,7 +201,14 @@ function action(id, kind) {
   chrome.send("spaceAction", [id, kind]);
   setTimeout(refresh, 250);
 }
-window.prismSpaces = { onData };
+window.prismSpaces = { onData, onShown };
+function onShown() {
+  entered = false;
+  exiting = false;
+  modeShownAt = Date.now();
+  refreshCounter++;
+  refresh();
+}
 function span(parent, className, text) {
   const el = document.createElement("span");
   if (className) el.className = className;
@@ -252,7 +267,7 @@ function revealEnter(focusedCard) {
     if (item.querySelector(".card") !== focusedCard) {
       item.style.setProperty("--d", d + "ms");
       item.classList.add("enter");
-      d += 55;
+      d += 50;
     }
     const card = item.querySelector(".card");
     if (card && card.dataset.agent === "1") {
@@ -283,18 +298,27 @@ function runShrinkIn(card, overlayImg) {
   const sx = rect.width / innerWidth;
   const sy = rect.height / innerHeight;
   const pos = `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`;
+  // recon §8: the content lifts ~5-10% of the window height, then scales
+  // down into the card slot with a crossfade (~0.6-0.8s total ease-out).
+  const lift = Math.round(innerHeight * -0.07);
   fx.animate([
-    { transform: "translateY(-16px) scale(1)", opacity: 1,
+    { transform: `translateY(${lift}px) scale(1)`, opacity: 1,
       borderRadius: "0px" },
     { transform: pos, opacity: 1, borderRadius: "14px", offset: 0.85 },
     { transform: pos, opacity: 0, borderRadius: "14px" }
-  ], { duration: 600, easing: "cubic-bezier(.2,.8,.25,1)", fill: "forwards" })
+  ], { duration: 650, easing: "cubic-bezier(.2,.8,.25,1)", fill: "forwards" })
     .onfinish = () => { fx.remove(); card.classList.remove("fx-self-hidden"); };
 }
 function playEnter(data) {
-  const currentId = data.current || data.focused;
+  const currentId = (data.current !== undefined) ? data.current : data.focused;
   const focusedCard = document.querySelector(
       `#wall .card[data-space="${currentId}"]`);
+  // The dark dashboard backdrop fades in behind the shrink (recon §8).
+  const backdrop = document.createElement("div");
+  backdrop.id = "fxBackdrop";
+  document.body.appendChild(backdrop);
+  requestAnimationFrame(() => { backdrop.style.opacity = "1"; });
+  setTimeout(() => backdrop.remove(), 1400);
   // The current card stays hidden until the shrink-in overlay lands in it;
   // the overlay fetch doubles as the on-demand thumbnail (900ms budget).
   if (focusedCard) focusedCard.classList.add("fx-self-hidden");
@@ -362,8 +386,10 @@ function openSpace(card, id) {
              windowMode ? 500 : 380);
 }
 
+let lastData = null;
 function onData(payloadJson) {
   const data = JSON.parse(payloadJson);
+  lastData = data;
   const spaces = data.spaces || [];
   document.getElementById("captionText").textContent =
       spaces.length + " Space" + (spaces.length === 1 ? "" : "s");
@@ -426,8 +452,15 @@ function onData(payloadJson) {
   addItem.appendChild(add);
   wall.appendChild(addItem);
 
+  if (windowMode && data.shownAt && data.shownAt !== lastShownAt) {
+    lastShownAt = data.shownAt;
+    entered = false;
+    exiting = false;
+    modeShownAt = Date.now();
+  }
   if (!entered) {
     entered = true;
+    if (!windowMode) modeShownAt = Date.now();
     playEnter(data);
   }
 }
@@ -443,10 +476,35 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden && windowMode) {
     entered = false;
     exiting = false;
+    modeShownAt = Date.now();
     refreshCounter++;
     refresh();
   }
 });
+// recon §8: the mode host re-registers with a fresh shownAt on every show —
+// replay the enter motion whenever it changes (works on re-entry even when
+// no visibilitychange reaches the page).
+let lastShownAt = -1;
+// recon §8: ⌘⇧S exits the mode. The mode host's WebView sits outside the
+// widget's accelerator focus chain, so the native accelerator never fires
+// while the wall has focus — handle the chord in-page instead (the native
+// path still owns entry from normal chrome).
+document.addEventListener("keydown", (e) => {
+  if (windowMode && e.metaKey && e.shiftKey &&
+      (e.key === "s" || e.key === "S")) {
+    e.preventDefault();
+    // The keypress that ENTERED the mode propagates to the wall too (the
+    // native accelerator does not consume it) — ignore the chord during the
+    // entry window so a single press does not enter and immediately exit.
+    if (exiting || Date.now() - modeShownAt < 700) return;
+    exiting = true;
+    action(currentSpaceId(), "exitSpaces");
+  }
+});
+function currentSpaceId() {
+  return lastData && lastData.current !== undefined ? lastData.current : 0;
+}
+let modeShownAt = 0;
 refresh();
 setInterval(() => { refreshCounter++; refresh(); }, 2000);)JS";
 
@@ -466,6 +524,12 @@ struct ThumbCacheEntry {
   base::TimeTicks at;
 };
 
+// Live controllers, for NotifyModeShown (recon §8).
+std::set<PrismSpacesUI*>& SpacesUIRegistry() {
+  static base::NoDestructor<std::set<PrismSpacesUI*>> registry;
+  return *registry;
+}
+
 std::map<int, ThumbCacheEntry>& ThumbCache() {
   static base::NoDestructor<std::map<int, ThumbCacheEntry>> cache;
   return *cache;
@@ -476,6 +540,34 @@ void RespondPng(content::WebUIDataSource::GotDataCallback callback,
   std::vector<uint8_t> bytes(png.begin(), png.end());
   std::move(callback).Run(
       base::MakeRefCounted<base::RefCountedBytes>(std::move(bytes)));
+}
+
+// Clipped DevTools captures resize the target's RenderWidgetHostView, which
+// wedges a live tab (the default space card captures the main window's
+// current page every poll). So thumbnails capture the viewport at native
+// size and downscale in-process to 1/4 instead (recon §8).
+std::string DownscalePng(const std::string& png) {
+  const SkBitmap decoded = gfx::PNGCodec::Decode(
+      base::as_bytes(base::span(png)));
+  if (decoded.isNull()) {
+    return png;
+  }
+  const int width = std::max(1, decoded.width() / 4);
+  const int height = std::max(1, decoded.height() / 4);
+  SkBitmap bitmap;
+  if (!bitmap.tryAllocPixels(SkImageInfo::MakeN32Premul(width, height))) {
+    return png;
+  }
+  SkCanvas canvas(bitmap);
+  canvas.clear(SK_ColorTRANSPARENT);
+  canvas.drawImageRect(decoded.asImage(), SkRect::MakeWH(width, height),
+                       SkSamplingOptions(SkFilterMode::kLinear));
+  auto encoded = gfx::PNGCodec::FastEncodeBGRASkBitmap(
+      bitmap, /*discard_transparency=*/false);
+  if (!encoded) {
+    return png;
+  }
+  return std::string(encoded->begin(), encoded->end());
 }
 
 // One-shot screenshot of a space tab via the internal DevTools protocol
@@ -497,9 +589,12 @@ class ThumbnailJob : public content::DevToolsAgentHostClient {
         base::BindOnce(&ThumbnailJob::Finish, base::Unretained(this),
                        std::string()));
     host_->AttachClient(this);
-    // 1280x800 is the fixed viewport of windowless tabs; scale 0.25 → 320px.
+    // No clip: a clipped capture resizes the target's RenderWidgetHostView,
+    // which wedges a visible tab (the default space card captures the main
+    // window's current page every poll). Scale-only captures the current
+    // viewport at 0.25 — windowless tabs keep their fixed 1280x800 viewport.
     const std::string message =
-        R"({"id":1,"method":"Page.captureScreenshot","params":{"format":"png","clip":{"x":0,"y":0,"width":1280,"height":800,"scale":0.25}}})";
+        R"({"id":1,"method":"Page.captureScreenshot","params":{"format":"png","scale":0.25}})";
     host_->DispatchProtocolMessage(this, base::as_byte_span(message));
   }
 
@@ -536,7 +631,7 @@ class ThumbnailJob : public content::DevToolsAgentHostClient {
       host_ = nullptr;
     }
     if (!png.empty()) {
-      ThumbCache()[space_id_] = {png, base::TimeTicks::Now()};
+      ThumbCache()[space_id_] = {DownscalePng(png), base::TimeTicks::Now()};
     } else {
       png.assign(reinterpret_cast<const char*>(kFallbackPng),
                  sizeof(kFallbackPng));
@@ -566,7 +661,7 @@ void ServeThumbnail(const std::string& path,
     }
     space_id = space_id * 10 + (c - '0');
   }
-  if (space_id <= 0) {
+  if (space_id < 0) {
     RespondPng(std::move(callback),
                std::string(reinterpret_cast<const char*>(kFallbackPng),
                            sizeof(kFallbackPng)));
@@ -581,21 +676,32 @@ void ServeThumbnail(const std::string& path,
     return;
   }
 
-  // Capture the space's active tab (the last one marked active).
-  std::string target_id;
-  if (const auto* space = SpaceManager::GetInstance()->Find(space_id)) {
-    for (const auto& tab : space->tabs) {
-      if (tab.active) {
-        target_id = tab.target_id;
+  scoped_refptr<content::DevToolsAgentHost> host;
+  if (space_id == 0) {
+    // recon §8: the implicit default space is a first-class wall card — its
+    // thumbnail is the default browsing window's active tab.
+    if (auto* delegate = GetPrismSpaceWindowDelegate()) {
+      if (content::WebContents* active = delegate->ActiveTabForDefaultSpace()) {
+        host = content::DevToolsAgentHost::GetOrCreateFor(active);
       }
     }
-    if (target_id.empty() && !space->tabs.empty()) {
-      target_id = space->tabs.back().target_id;
+  } else {
+    // Capture the space's active tab (the last one marked active).
+    std::string target_id;
+    if (const auto* space = SpaceManager::GetInstance()->Find(space_id)) {
+      for (const auto& tab : space->tabs) {
+        if (tab.active) {
+          target_id = tab.target_id;
+        }
+      }
+      if (target_id.empty() && !space->tabs.empty()) {
+        target_id = space->tabs.back().target_id;
+      }
+    }
+    if (!target_id.empty()) {
+      host = content::DevToolsAgentHost::GetForId(target_id);
     }
   }
-  auto host = target_id.empty()
-                  ? nullptr
-                  : content::DevToolsAgentHost::GetForId(target_id);
   if (!host) {
     RespondPng(std::move(callback),
                std::string(reinterpret_cast<const char*>(kFallbackPng),
@@ -639,13 +745,44 @@ int CurrentSpaceIdForWebContents(content::WebContents* wc) {
   return delegate->SpaceIdForModeWebContents(wc);
 }
 
-std::string SpacesJson(const std::string& watermark, int current_space_id) {
+std::string SpacesJson(const std::string& watermark, int current_space_id,
+                       int64_t shown_at_ms) {
   auto* manager = SpaceManager::GetInstance();
   base::DictValue root;
   root.Set("focused", manager->focused_space_id());
   root.Set("current", current_space_id);
   root.Set("watermark", watermark);
+  // recon §8: the mode's last-show timestamp drives the wall's enter replay
+  // (0 when tab-hosted).
+  root.Set("shownAt", static_cast<double>(shown_at_ms));
   base::ListValue spaces;
+  // recon §8: the implicit default browsing context is a first-class wall
+  // card (id 0), always first — counted in the caption like any space.
+  {
+    base::DictValue entry;
+    entry.Set("id", 0);
+    entry.Set("name", "Space");
+    entry.Set("taskId", "");
+    entry.Set("createdBy", "user");
+    entry.Set("ownership", "user");
+    entry.Set("agentTaskState", "");
+    entry.Set("windowShown", true);
+    bool has_tab = false;
+    base::ListValue tabs;
+    if (auto* delegate = GetPrismSpaceWindowDelegate()) {
+      if (content::WebContents* active = delegate->ActiveTabForDefaultSpace()) {
+        has_tab = true;
+        base::DictValue t;
+        t.Set("title", active->GetTitle());
+        t.Set("url", active->GetLastCommittedURL().spec());
+        t.Set("active", true);
+        tabs.Append(std::move(t));
+      }
+    }
+    entry.Set("hasTabs", has_tab);
+    entry.Set("tabs", std::move(tabs));
+    spaces.Append(std::move(entry));
+  }
   for (const auto& space : manager->List()) {
     base::DictValue entry;
     entry.Set("id", space.id);
@@ -737,9 +874,27 @@ PrismSpacesUI::PrismSpacesUI(content::WebUI* web_ui)
   web_ui->RegisterMessageCallback(
       "spaceAction",
       base::BindRepeating(&PrismSpacesUI::OnAction, base::Unretained(this)));
+  SpacesUIRegistry().insert(this);
 }
 
-PrismSpacesUI::~PrismSpacesUI() = default;
+PrismSpacesUI::~PrismSpacesUI() {
+  SpacesUIRegistry().erase(this);
+}
+
+// static
+void PrismSpacesUI::NotifyModeShown(content::WebContents* wc) {
+  for (auto* ui : SpacesUIRegistry()) {
+    if (ui->web_ui()->GetWebContents() == wc) {
+      // Push fresh data and the show signal through the controller's own
+      // channel — plain CallJavascriptFunctionUnsafe from an arbitrary task
+      // does not reach this WebContents (recon §8 investigation).
+      ui->OnQuerySpaces(base::ListValue());
+      ui->web_ui()->CallJavascriptFunctionUnsafe("prismSpaces.onShown",
+                                                 base::ValueView(base::Value(0)));
+      return;
+    }
+  }
+}
 
 void PrismSpacesUI::OnQuerySpaces(const base::ListValue& args) {
   // The page is our own (served from the request filter above), so the
@@ -748,7 +903,13 @@ void PrismSpacesUI::OnQuerySpaces(const base::ListValue& args) {
   web_ui()->CallJavascriptFunctionUnsafe("prismSpaces.onData",
                                          base::ValueView(SpacesJson(
           Watermark(web_ui()),
-          CurrentSpaceIdForWebContents(web_ui()->GetWebContents()))));
+          CurrentSpaceIdForWebContents(web_ui()->GetWebContents()),
+          GetPrismSpaceWindowDelegate()
+              ? GetPrismSpaceWindowDelegate()
+                    ->SpacesModeShownAt(web_ui()->GetWebContents())
+                    .ToDeltaSinceWindowsEpoch()
+                    .InMilliseconds()
+              : 0)));
 }
 
 void PrismSpacesUI::OnAction(const base::ListValue& args) {
@@ -797,7 +958,13 @@ void PrismSpacesUI::OnAction(const base::ListValue& args) {
   web_ui()->CallJavascriptFunctionUnsafe("prismSpaces.onData",
                                          base::ValueView(SpacesJson(
           Watermark(web_ui()),
-          CurrentSpaceIdForWebContents(web_ui()->GetWebContents()))));
+          CurrentSpaceIdForWebContents(web_ui()->GetWebContents()),
+          GetPrismSpaceWindowDelegate()
+              ? GetPrismSpaceWindowDelegate()
+                    ->SpacesModeShownAt(web_ui()->GetWebContents())
+                    .ToDeltaSinceWindowsEpoch()
+                    .InMilliseconds()
+              : 0)));
 }
 
 }  // namespace prism

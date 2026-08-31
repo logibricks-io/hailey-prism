@@ -249,6 +249,28 @@ int PrismSpaceWindowDelegate::SpaceIdForWindow(
   return 0;
 }
 
+BrowserWindowInterface* PrismSpaceWindowDelegate::DefaultSpaceWindow() const {
+  BrowserWindowInterface* found = nullptr;
+  GlobalBrowserCollection::GetInstance()->ForEach(
+      [&](BrowserWindowInterface* candidate) {
+        if (candidate->GetType() != BrowserWindowInterface::Type::TYPE_NORMAL) {
+          return true;
+        }
+        if (SpaceIdForWindow(candidate) != 0) {
+          return true;  // a task space's window, keep looking
+        }
+        found = candidate;
+        return false;
+      });
+  return found;
+}
+
+content::WebContents* PrismSpaceWindowDelegate::ActiveTabForDefaultSpace()
+    const {
+  BrowserWindowInterface* window = DefaultSpaceWindow();
+  return window ? window->GetTabStripModel()->GetActiveWebContents() : nullptr;
+}
+
 void PrismSpaceWindowDelegate::RegisterSpacesMode(
     BrowserWindowInterface* window,
     content::WebContents* wall_wc,
@@ -256,7 +278,7 @@ void PrismSpaceWindowDelegate::RegisterSpacesMode(
   if (!wall_wc) {
     return;
   }
-  spaces_modes_[wall_wc] = {window, std::move(exit_cb)};
+  spaces_modes_[wall_wc] = {window, std::move(exit_cb), base::Time::Now()};
 }
 
 void PrismSpaceWindowDelegate::UnregisterSpacesMode(
@@ -267,6 +289,12 @@ void PrismSpaceWindowDelegate::UnregisterSpacesMode(
 bool PrismSpaceWindowDelegate::IsSpacesModeWebContents(
     const content::WebContents* wc) const {
   return wc && spaces_modes_.contains(const_cast<content::WebContents*>(wc));
+}
+
+base::Time PrismSpaceWindowDelegate::SpacesModeShownAt(
+    const content::WebContents* wc) const {
+  auto it = spaces_modes_.find(const_cast<content::WebContents*>(wc));
+  return it == spaces_modes_.end() ? base::Time() : it->second.shown_at;
 }
 
 int PrismSpaceWindowDelegate::SpaceIdForModeWebContents(

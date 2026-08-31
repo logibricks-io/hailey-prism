@@ -3,12 +3,15 @@
 
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "chrome/browser/ui/views/prism/prism_spaces_mode_host.h"
+#include "chrome/browser/ui/webui/prism_spaces/prism_spaces_ui.h"
 
 #include "chrome/browser/prism/prism_space_window_delegate.h"
 #include "chrome/browser/prism/prism_spaces_ui_constants.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/navigation_controller.h"
+#include "base/task/single_thread_task_runner.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
 #include "ui/views/controls/webview/webview.h"
 #include "ui/views/layout/fill_layout.h"
 #include "url/gurl.h"
@@ -44,15 +47,29 @@ void PrismSpacesModeHost::ShowSpacesWall() {
         ui::PAGE_TRANSITION_AUTO_TOPLEVEL, std::string());
     web_view_->SetWebContents(contents_.get());
   }
-  if (!registered_) {
-    registered_ = true;
-    GetPrismSpaceWindowDelegate()->RegisterSpacesMode(
-        browser_window_interface_, contents_.get(),
-        prism::PrismSpaceWindowDelegate::SpacesModeExitCallback(
-            exit_to_chrome_));
-  }
+  // (Re-)register on every show: the entry's shown_at timestamp drives the
+  // wall's enter-animation replay on re-entry.
+  registered_ = true;
+  GetPrismSpaceWindowDelegate()->RegisterSpacesMode(
+      browser_window_interface_, contents_.get(),
+      prism::PrismSpaceWindowDelegate::SpacesModeExitCallback(
+          exit_to_chrome_));
   SetVisible(true);
   contents_->WasShown();
+  // Prompt the wall to replay the enter motion immediately (recon §8) —
+  // visibilitychange does not reliably reach the re-shown page. Posted: the
+  // renderer needs a turn to process the visibility flip before the call
+  // lands.
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
+      FROM_HERE,
+      base::BindOnce(
+          [](base::WeakPtr<content::WebContents> contents) {
+            if (contents) {
+              PrismSpacesUI::NotifyModeShown(contents.get());
+            }
+          },
+          contents_->GetWeakPtr()),
+      base::Milliseconds(120));
 }
 
 void PrismSpacesModeHost::HideSpacesWall() {

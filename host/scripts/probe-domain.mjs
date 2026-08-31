@@ -450,9 +450,11 @@ async function runPhase5Suite(cdp) {
     "Array.from(document.querySelectorAll('#wall .card[data-space]')).map((n) => n.dataset.name).join(',')");
   check("phase5: cards carry the space names",
     names.includes("phase5-alpha") && names.includes("phase5-beta"), names);
+  // The caption counts the implicit default browsing context as a space
+  // (recon §8): 2 task spaces + default.
   const countText = await evalIn(
     "document.getElementById('captionText').textContent");
-  check("phase5: header shows the space count", countText.trim() === "2 Spaces", countText);
+  check("phase5: header shows the space count", countText.trim() === "3 Spaces", countText);
 
   // Thumbnails: the card <img> for alpha's space loads a real capture of its
   // example.com tab (the 1x1 transparent fallback has naturalWidth 1). fetch()
@@ -494,9 +496,10 @@ async function runPhase5Suite(cdp) {
   const emptied = await pollUntil(async () =>
     (await cdp.send("Prism.listTaskSpaces")).taskSpaces.length === 0);
   check("phase5: delete-all closes every space", !!emptied);
+  // Default-space card + create card remain (recon §8).
   const cardsAfterDelete = await pollUntil(async () =>
-    (await evalIn("document.querySelectorAll('#wall .card').length")) === 1);
-  check("phase5: the wall falls back to just the create card", !!cardsAfterDelete,
+    (await evalIn("document.querySelectorAll('#wall .card').length")) === 2);
+  check("phase5: the wall falls back to the default + create cards", !!cardsAfterDelete,
     `cards=${await evalIn("document.querySelectorAll('#wall .card').length")}`);
 
   try {

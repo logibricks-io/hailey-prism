@@ -10,6 +10,10 @@
 #include "content/public/browser/web_ui_controller.h"
 #include "content/public/browser/webui_config.h"
 
+namespace content {
+class WebContents;
+}
+
 namespace prism {
 
 class PrismSpacesUI;
@@ -26,6 +30,11 @@ class PrismSpacesUI : public content::WebUIController {
  public:
   explicit PrismSpacesUI(content::WebUI* web_ui);
   ~PrismSpacesUI() override;
+
+  // Prompts the wall hosted in `wc` (a spaces-mode wall) to replay the enter
+  // motion (recon §8). Routed through the live controller because its
+  // CallJavascriptFunctionUnsafe channel is the proven-working one.
+  static void NotifyModeShown(content::WebContents* wc);
 
  private:
   // chrome.send("spaceAction", [id, action]) — view/takeover/handoff/close.

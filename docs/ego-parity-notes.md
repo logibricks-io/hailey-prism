@@ -227,29 +227,42 @@ Kulim Park (OFL) bundled for display type.
   `<display name> Agents Prism` / "Your Prism"; "+" card is plain dark with
   a single large plus. No meta chips, no buttons, no placeholder letter.
   Thumbnails re-capture on the 2 s poll while open (near-live).
-- Motion: same FLIP enter (current card's fresh capture lifts + scales
-  into its slot with crossfade, others stagger in from the right, caption +
-  hint fade, agent thumbs pop) and reverse exit expansion that fires
-  mid-crossfade. "Current" = the space of the window hosting the mode
-  (`SpaceIdForModeWebContents`); the focused highlight keeps the manager id.
+- **The implicit default space is a first-class wall card** (id 0): live
+  thumbnail of the default window's active tab, "Space" label, watermark,
+  counted in the caption ("1 Space" with no task spaces, "2 Spaces" with
+  one agent space). Captures run clip-less (a clipped capture resizes the
+  live tab's RenderWidgetHostView) and downscale in-process (PNGCodec).
+- Motion (recon §8): enter FLIP from every entry path — the current card's
+  fresh capture lifts ~7% of window height and scales into its slot with a
+  crossfade (~0.65 s), the dark backdrop fades in, other cards rise/fade
+  in place (~50 ms stagger), caption + hint bar fade in the second half
+  (the native caption lands ~150 ms after the choreographed 200 ms chrome
+  collapse — no jump cut). The replay trigger is the mode host's
+  `prismSpaces.onShown` ping routed through the WebUI controller's own
+  message channel (plain CallJavascriptFunctionUnsafe from an arbitrary
+  task does not reach this WebContents — investigated), with the `shownAt`
+  poll comparison as the deterministic fallback. Exit = reverse expansion
+  into the restored window (incl. the default card).
 - Automation: chrome://prism-spaces opened as a tab URL still renders the
   wall with the in-page header for CDP-driven clients; space identity/state
   travels as `data-*` attributes on `.card` (docs/binding-contract.md
-  §wall); probe phase4/5 read attributes.
+  §wall, incl. the default card `data-space="0"`); probe phase4/5 read
+  attributes.
 - **Residual deltas**: (1) cards are periodic captures, not re-parented
   live WebContents — true re-parenting into the card slot is out of scope,
-  so agent cards refresh every 2 s instead of rendering live; (2) the
-  implicit default space has no card — opening the mode from default-space
-  browsing plays no shrink-in overlay; (3) the shrink start lags the open
-  by the on-demand thumbnail fetch (900 ms budget, then plain slide-in);
-  (4) macOS AX keeps two invisible orphans in mode: the covered tab's
-  AXWebArea (standard background-tab exposure on macOS) and the Reload
-  menu button's AXPopUpButton (views/mac AX orphan of its menu model) —
-  nothing visible in either case; (5) focusing a space from the mode raises
-  that space's own window (our window-per-space model), it does not swap
-  this window's tab set the way ego does; (6) window title still follows
-  the underlying tab while in mode; (7) spring curve/stagger are
-  approximations from the recording, not measured keyframes.
+  so cards refresh on the poll instead of rendering live; (2) offscreen /
+  AppKit-occluded windows intermittently capture blank thumbnails (a
+  testing-harness artifact; visible windows capture fine); (3) macOS AX
+  keeps two invisible orphans in mode: the covered tab's AXWebArea
+  (standard background-tab exposure on macOS) and the Reload menu button's
+  AXPopUpButton (views/mac AX orphan of its menu model) — nothing visible
+  in either case; (4) focusing a space from the mode raises that space's
+  own window (our window-per-space model), it does not swap this window's
+  tab set the way ego does; (5) window title still follows the underlying
+  tab while in mode; (6) spring curve/stagger/lift are approximations from
+  the recording, not measured keyframes; (7) the first synthetic key event
+  after a background launch can be swallowed (harness-only; real launches
+  are unaffected).
 - Verified silently: `docs/assets/spaces-mode-dashboard.png` (mode top row
   + fullscreen wall), `docs/assets/spaces-mode-exit.png` (chrome restored
   after a card click).

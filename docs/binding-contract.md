@@ -108,8 +108,12 @@ is therefore attribute-based: each `#wall .card[data-space]` carries
 agent-owned). The card count (`#wall .card`, including the create card),
 the focused highlight (`.card.focused`), the in-page `#captionText`
 ("N Spaces"), and the thumbnail `img` (`.card[data-space] .thumb img`) are
-part of the same contract. Window-mode presentations hide the in-page
-header; the native top row (caption + corner trigger) is views UI, not DOM.
+part of the same contract. **The implicit default browsing context is a
+first-class card** (`data-space="0"`, `data-ownership="user"`, name
+"Space", live thumbnail of the default window's active tab) and counts in
+the caption (`"1 Space"` with no task spaces). Window-mode presentations
+hide the in-page header; the native top row (caption + corner trigger) is
+views UI, not DOM.
 
 ---
 
