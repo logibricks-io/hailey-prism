@@ -70,16 +70,12 @@ constexpr char kPageHtml[] = R"HTML(<!doctype html>
   @keyframes thumb-pop { from { opacity: 0; transform: scale(.92); } }
   .item.enter { animation: card-in-calm .45s cubic-bezier(.2,.8,.25,1)
                 backwards; animation-delay: var(--d, 0ms); }
-  #fxBackdrop { position: fixed; inset: 0; z-index: 99; background: #171717;
-                opacity: 0; pointer-events: none;
-                transition: opacity .25s ease; }
   header.enter { animation: fade-in .4s ease .25s backwards; }
   #hintBar.enter { animation: fade-in .4s ease .35s backwards; }
   .thumb img.pop { animation: thumb-pop .3s cubic-bezier(.2,.9,.3,1.15)
                    backwards; animation-delay: var(--d, 0ms); }
   #fxOverlay { position: fixed; z-index: 100; pointer-events: none;
                object-fit: cover; object-position: top; background: #101010; }
-  .card.fx-self-hidden { opacity: 0; }
 
   /* recon §8: hosted window-wide (?window=1) the page has no header — the
      native top row (caption + corner trigger) replaces it. */
@@ -256,6 +252,32 @@ document.getElementById("hintDismiss").addEventListener("click", () => {
   try { localStorage.setItem("prismSpacesHintDismissed", "1"); } catch (e) {}
 });
 
+// Swap-safe thumbnails: each card keeps its last good (non-fallback)
+// capture; a new capture only swaps in after it has fully decoded, and
+// blank/failed captures never replace it (recon §8 follow-up: no blank
+// flash on the 2s poll or after the shrink settles).
+const lastGoodThumb = new Map();
+function buildThumb(spaceId, counter) {
+  const url = "thumb/" + spaceId + "." + counter + ".png";
+  const img = document.createElement("img");
+  img.alt = "";
+  const good = lastGoodThumb.get(spaceId);
+  img.src = good || url;
+  if (url !== good) {
+    const pre = new Image();
+    pre.onload = () => {
+      // The 1x1 fallback (capture failure) has naturalWidth 1 — never swap
+      // to it; keep the last good frame instead.
+      if (pre.naturalWidth > 1) {
+        lastGoodThumb.set(spaceId, url);
+        if (img.isConnected) img.src = url;
+      }
+    };
+    pre.src = url;
+  }
+  return img;
+}
+
 // ---- recon §7/§8 enter motion (~0.5-0.7s ease-out) -----------------------
 const header = document.querySelector("header");
 function revealEnter(focusedCard) {
@@ -279,13 +301,20 @@ function revealEnter(focusedCard) {
       }
     }
   }
-  if (focusedCard && !focusedCard.classList.contains("fx-self-hidden")) {
-    focusedCard.closest(".item").classList.add("enter");
-  }
+  // The current card stays put and visible — the shrink overlay covers it
+  // until the same-pixels fade tail (no hidden-then-pop flash).
 }
 function runShrinkIn(card, overlayImg) {
   const thumb = card.querySelector(".thumb");
+  const img = thumb.querySelector("img");
   const rect = thumb.getBoundingClientRect();
+  // Handoff continuity: the card shows the overlay's own capture (same
+  // pixels, same scale) underneath the overlay for the whole flight, so the
+  // final fade has no hole and no refetch.
+  if (img && img.src !== overlayImg.src) {
+    img.src = overlayImg.src;
+  }
+  lastGoodThumb.set(card.dataset.space, overlayImg.src);
   const fx = document.createElement("img");
   fx.id = "fxOverlay";
   fx.src = overlayImg.src;
@@ -299,47 +328,51 @@ function runShrinkIn(card, overlayImg) {
   const sy = rect.height / innerHeight;
   const pos = `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`;
   // recon §8: the content lifts ~5-10% of the window height, then scales
-  // down into the card slot with a crossfade (~0.6-0.8s total ease-out).
+  // down into the card slot. The last ~120ms fades the overlay out INTO the
+  // card (identical pixels beneath) — no flash frame.
   const lift = Math.round(innerHeight * -0.07);
   fx.animate([
     { transform: `translateY(${lift}px) scale(1)`, opacity: 1,
       borderRadius: "0px" },
-    { transform: pos, opacity: 1, borderRadius: "14px", offset: 0.85 },
+    { transform: pos, opacity: 1, borderRadius: "14px", offset: 0.82 },
     { transform: pos, opacity: 0, borderRadius: "14px" }
   ], { duration: 650, easing: "cubic-bezier(.2,.8,.25,1)", fill: "forwards" })
-    .onfinish = () => { fx.remove(); card.classList.remove("fx-self-hidden"); };
+    .onfinish = () => fx.remove();
 }
 function playEnter(data) {
   const currentId = (data.current !== undefined) ? data.current : data.focused;
   const focusedCard = document.querySelector(
       `#wall .card[data-space="${currentId}"]`);
-  // The dark dashboard backdrop fades in behind the shrink (recon §8).
-  const backdrop = document.createElement("div");
-  backdrop.id = "fxBackdrop";
-  document.body.appendChild(backdrop);
-  requestAnimationFrame(() => { backdrop.style.opacity = "1"; });
-  setTimeout(() => backdrop.remove(), 1400);
-  // The current card stays hidden until the shrink-in overlay lands in it;
-  // the overlay fetch doubles as the on-demand thumbnail (900ms budget).
-  if (focusedCard) focusedCard.classList.add("fx-self-hidden");
+  // Re-entry cleanup: the exit overlay holds fullscreen opacity by design,
+  // but the page outlives it (mode re-entry, tab refocus) — drop leftover
+  // overlays and restore the hint bar / header the exit dimmed inline,
+  // or the settled wall stays masked by a stale fullscreen frame.
+  for (const stale of document.querySelectorAll("#fxOverlay")) stale.remove();
+  for (const el of [hintBar, header]) {
+    el.style.transition = "";
+    el.style.opacity = "";
+  }
+  // The wall's own dark background is the backdrop (recon §8); a separate
+  // overlay backdrop was covering the settled cards and hard-removing into
+  // a visible black flash.
   revealEnter(focusedCard);
-  const img = focusedCard && focusedCard.querySelector(".thumb img");
-  if (!img) return;
+  if (!focusedCard) return;
+  // The overlay uses the FRESH capture of the live page (this poll's counter
+  // URL, not the card's last-good frame); budget 900ms, then plain slide-in.
   const pre = new Image();
   let done = false;
   const finish = (ok) => {
     if (done || exiting) return;
     done = true;
-    if (ok) {
+    if (ok && pre.naturalWidth > 1) {
       runShrinkIn(focusedCard, pre);
     } else {
-      focusedCard.classList.remove("fx-self-hidden");
       focusedCard.closest(".item").classList.add("enter");
     }
   };
   pre.onload = () => finish(true);
   pre.onerror = () => finish(false);
-  pre.src = img.src;
+  pre.src = "thumb/" + focusedCard.dataset.space + "." + refreshCounter + ".png";
   setTimeout(() => finish(false), 900);
 }
 
@@ -375,15 +408,20 @@ function openSpace(card, id) {
     fx.animate([
       { transform: "translate(0px, 0px) scale(1)", opacity: 1,
         borderRadius: "14px" },
-      { transform: pos, opacity: 1, borderRadius: "0px", offset: 0.85 },
-      { transform: pos, opacity: 0, borderRadius: "0px" }
-    ], { duration: 550, easing: "cubic-bezier(.2,.8,.25,1)", fill: "forwards" })
-      .onfinish = () => fx.remove();
+      { transform: pos, opacity: 1, borderRadius: "0px" }
+    ], { duration: 550, easing: "cubic-bezier(.2,.8,.25,1)", fill: "forwards" });
+    // The overlay holds fullscreen opacity until the restored tab paints
+    // underneath it (the page hides with the mode), so the handoff has no
+    // dark gap (recon §8 follow-up: no flash on exit either).
+    // Safety net: the page normally hides with the mode exit (or the tab
+    // switch) before this fires — but if it outlives the handoff (tab
+    // refocus, quick re-entry), the held overlay must not mask the wall.
+    setTimeout(() => fx.remove(), 1000);
   }
   // Fire as the expansion crosses fullscreen: window mode exits into the
   // space; the tab-hosted page just focuses it.
   setTimeout(() => action(id, windowMode ? "exitSpaces" : "focus"),
-             windowMode ? 500 : 380);
+             windowMode ? 470 : 380);
 }
 
 let lastData = null;
@@ -415,10 +453,7 @@ function onData(payloadJson) {
     const thumb = document.createElement("div");
     thumb.className = "thumb";
     if (space.hasTabs) {
-      const img = document.createElement("img");
-      img.src = "thumb/" + space.id + "." + refreshCounter + ".png";
-      img.alt = "";
-      thumb.appendChild(img);
+      thumb.appendChild(buildThumb(space.id, refreshCounter));
     }
     card.appendChild(thumb);
     item.appendChild(card);
